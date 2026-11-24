@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node server.mjs",
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check dist/app.js && node --check dist/organic.js && node --check dist/motion.js && node --check dist/gait.js && node --check dist/leg-safety.js && node --check dist/patrol.js && node --check dist/skid-effects.js && node --check dist/desktop.js && node --check dist/desktop-behavior.js",
+    "check": "node --check server.mjs && node --check dist/app.js && node --check dist/organic.js && node --check dist/motion.js && node --check dist/gait.js && node --check dist/leg-safety.js && node --check dist/patrol.js && node --check dist/skid-effects.js && node --check dist/desktop.js && node --check dist/desktop-behavior.js && node --check dist/desktop-i18n.js && node --check dist/controls.js",
     "test:gait": "node scripts/check-gait.mjs",
     "test:burst": "node scripts/check-gait.mjs --route",
     "test:inertia": "node scripts/check-inertia.mjs",

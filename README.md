@@ -20,13 +20,13 @@ The desktop companion currently targets **macOS 12 and later**. The current buil
 
 After building from source, drag `Araneae.app` into Applications and open it. If you download a separately provided prebuilt app, make sure its processor architecture matches your Mac. The source repository does not include a compiled app.
 
-On launch, only the spider and a small eyes icon in the menu bar appear. The control panel does not open automatically, and the app does not appear in the Dock. Open “控制面板” (Control Panel) from the menu bar to adjust settings. The current app interface is in Simplified Chinese.
+On launch, the spider appears on your screen, accompanied by a small eyes icon in the menu bar. The app stays out of the Dock and keeps the control panel closed until you open it from the menu bar. The desktop interface follows the system’s preferred language at launch: Chinese uses Simplified Chinese, and other languages use English. This applies to the menu bar, control panel, window titles, and messages. Restart the app after changing your system language.
 
 | Action | Result |
 | --- | --- |
 | Choose a mode from the menu bar or panel | Autonomous patrol, follow the pointer, or observe in place |
 | ⌘ Command + click | Temporarily dash toward the destination at up to 3× speed; click again to change the destination |
-| Turn off “允许跨屏” (Allow Cross-Display Movement) | Stay on the spider’s current display and ignore Command-clicks on other displays |
+| Turn off Allow Cross-Display Movement | Stay on the spider’s current display and ignore Command-clicks on other displays |
 | Pause / hide | Stop continuous rendering and ignore movement commands |
 | Press Space in the control panel | Pause / resume |
 
@@ -61,7 +61,7 @@ Open **http://127.0.0.1:4173/**. Do not open `dist/index.html` directly: ES Modu
 
 If the port is in use, run `PORT=4174 npm run dev` on macOS / Linux, or `$env:PORT=4174; npm run dev` in PowerShell.
 
-Browser controls differ from the desktop companion: **click to move, double-click to dash, and Space to pause**. The browser version also retains light/dark backgrounds and fullscreen controls. Cross-display movement and Command-click commands belong to the macOS desktop companion.
+Browser controls differ from the desktop companion: **click to move, double-click to dash, and Space to pause**. The browser version also retains light/dark backgrounds and fullscreen controls. Its interface remains in Simplified Chinese. Cross-display movement, Command-click commands, and automatic interface language selection belong to the macOS desktop companion.
 
 ### macOS Desktop Companion
 

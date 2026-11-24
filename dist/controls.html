@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Araneae · 控制面板</title>
+  <title data-i18n="controlTitle">Araneae · Control Panel</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="desktop.css">
 </head>
@@ -12,25 +12,25 @@
     <img class="desktop-mark" src="araneae-mark.svg" alt="" aria-hidden="true">
     <div><h1>Araneae</h1><p class="eyebrow">Araneae / DESKTOP COMPANION</p></div>
   </div>
-  <section class="controls" aria-label="桌宠控制面板">
+  <section class="controls" aria-label="Desktop companion controls" data-i18n-label="controlsLabel">
     <fieldset id="settings" disabled>
-      <div class="panel-head"><span>行为控制</span><span class="serial">Araneae</span></div>
-      <div class="modes" role="group" aria-label="行为模式">
-        <button data-mode="roam" aria-pressed="true" class="selected">自主巡逻</button>
-        <button data-mode="follow" aria-pressed="false">跟随鼠标</button>
-        <button data-mode="observe" aria-pressed="false">原地观察</button>
+      <div class="panel-head"><span data-i18n="behavior">Behavior</span><span class="serial">Araneae</span></div>
+      <div class="modes" role="group" aria-label="Behavior modes" data-i18n-label="modesLabel">
+        <button data-mode="roam" data-i18n="roam" aria-pressed="true" class="selected">Patrol</button>
+        <button data-mode="follow" data-i18n="follow" aria-pressed="false">Follow Pointer</button>
+        <button data-mode="observe" data-i18n="observe" aria-pressed="false">Observe</button>
       </div>
-      <label class="range-row"><span>爬行速度</span><input id="speed" type="range" min="0.35" max="3" step="0.05" value="1.25"><output id="speedValue" for="speed">1.25×</output></label>
-      <label class="range-row"><span>身体大小</span><input id="size" type="range" min="0.35" max="2.1" step="0.05" value="0.5"><output id="sizeValue" for="size">0.50×</output></label>
-      <button id="allowCrossScreen" class="toggle cross-screen-toggle" aria-pressed="true"><span class="switch" aria-hidden="true"></span>允许跨屏</button>
+      <label class="range-row" for="speed"><span data-i18n="speed">Speed</span><input id="speed" type="range" min="0.35" max="3" step="0.05" value="1.25"><output id="speedValue" for="speed">1.25×</output></label>
+      <label class="range-row" for="size"><span data-i18n="size">Size</span><input id="size" type="range" min="0.35" max="2.1" step="0.05" value="0.5"><output id="sizeValue" for="size">0.50×</output></label>
+      <button id="allowCrossScreen" class="toggle cross-screen-toggle" aria-pressed="true"><span class="switch" aria-hidden="true"></span><span data-i18n="allowCrossScreen">Allow Cross-Display Movement</span></button>
       <div class="panel-bottom">
-        <button id="paused" class="text-button">暂停 Ⅱ</button>
-        <button id="visible">隐藏蜘蛛</button>
+        <button id="paused" class="text-button">Pause Ⅱ</button>
+        <button id="visible">Hide Spider</button>
       </div>
     </fieldset>
   </section>
-  <p class="desktop-note">按住 <strong>⌘ Command + 单击</strong>，冲刺前往。关闭允许跨屏后，仅响应蜘蛛所在屏幕的点击，巡逻和跟随也限定在该屏幕。暂停或隐藏时不响应。</p>
-  <p id="status" class="desktop-status" role="status">正在连接桌宠…</p>
+  <p class="desktop-note"><span data-i18n="noteBefore">Hold </span><strong data-i18n="command">⌘ Command + click</strong><span data-i18n="noteAfter"> to dash to a destination. When cross-display movement is off, clicks, patrol and following stay on the spider’s current display. Commands are ignored while paused or hidden.</span></p>
+  <p id="status" class="desktop-status" role="status" data-i18n="connecting">Connecting to the companion…</p>
   <script type="module" src="controls.js"></script>
 </body>
 </html>

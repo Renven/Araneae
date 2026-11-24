@@ -2,6 +2,7 @@
 
 mod desktop;
 mod interaction;
+mod language;
 mod settings;
 
 use settings::{Command, Mode, Settings};
@@ -224,10 +225,23 @@ fn place_viewport(
 }
 
 fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
+    let language = settings(app)?.language;
     let (label, title, url, width, height) = if original {
-        ("original", "Araneae · 完整原版", "index.html", 1200.0, 800.0)
+        (
+            "original",
+            language.text("Araneae · Browser Version", "Araneae · 完整原版"),
+            "index.html",
+            1200.0,
+            800.0,
+        )
     } else {
-        ("controls", "Araneae · 控制面板", "controls.html", 408.0, 560.0)
+        (
+            "controls",
+            language.text("Araneae · Control Panel", "Araneae · 控制面板"),
+            "controls.html",
+            408.0,
+            560.0,
+        )
     };
     let window = match app.get_webview_window(label) {
         Some(window) => window,
@@ -290,19 +304,20 @@ fn menu_action(app: &tauri::AppHandle, id: &str) -> DesktopResult<()> {
 }
 
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let language = settings(app).map_err(std::io::Error::other)?.language;
     let item = |id, text| MenuItem::with_id(app, id, text, true, None::<&str>);
     let menu = Menu::with_items(
         app,
         &[
-            &item("controls", "控制面板")?,
+            &item("controls", language.text("Control Panel", "控制面板"))?,
             &PredefinedMenuItem::separator(app)?,
-            &item("roam", "自主巡逻")?,
-            &item("follow", "跟随鼠标")?,
-            &item("observe", "原地观察")?,
+            &item("roam", language.text("Patrol", "自主巡逻"))?,
+            &item("follow", language.text("Follow Pointer", "跟随鼠标"))?,
+            &item("observe", language.text("Observe", "原地观察"))?,
             &PredefinedMenuItem::separator(app)?,
-            &item("visibility", "隐藏 / 显示")?,
+            &item("visibility", language.text("Hide / Show", "隐藏 / 显示"))?,
             &PredefinedMenuItem::separator(app)?,
-            &item("quit", "退出 Araneae")?,
+            &item("quit", language.text("Quit Araneae", "退出 Araneae"))?,
         ],
     )?;
     // macOS recolors the template image to match the menu bar appearance.
@@ -313,7 +328,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             44,
         ))
         .icon_as_template(true)
-        .tooltip("Araneae · 控制面板")
+        .tooltip(language.text("Araneae · Control Panel", "Araneae · 控制面板"))
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| {
@@ -372,6 +387,11 @@ fn main() {
             let window = app
                 .get_webview_window("pet")
                 .ok_or("Pet window is unavailable")?;
+            window.set_title(
+                settings(app.handle())?
+                    .language
+                    .text("Araneae Desktop Companion", "Araneae 桌宠"),
+            )?;
             window.set_ignore_cursor_events(true)?;
             #[cfg(target_os = "macos")]
             configure_macos(&window)?;

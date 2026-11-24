@@ -1,17 +1,23 @@
+import {desktopStrings, localizeDesktop} from './desktop-i18n.js';
+
 const {invoke} = window.__TAURI__.core;
 const {listen} = window.__TAURI__.event;
 const $ = id => document.getElementById(id);
 let settings;
+let strings = desktopStrings();
 let queue = Promise.resolve();
 const disposers = [];
 
 function report(error) {
   console.error('Desktop control operation failed:', error);
   $('status').classList.add('error');
-  $('status').textContent = '操作未完成：' + String(error);
+  $('status').textContent = strings.operationFailed + String(error);
 }
 
 function render(next) {
+  if (!settings || settings.language !== next.language) {
+    strings = localizeDesktop(document, next.language);
+  }
   settings = next;
   document.body.classList.toggle('dark', settings.dark);
   document.querySelectorAll('[data-mode]').forEach(button => {
@@ -23,13 +29,12 @@ function render(next) {
     if (document.activeElement !== $(key)) $(key).value = settings[key];
     $(key + 'Value').textContent = Number($(key).value).toFixed(2) + '×';
   }
-  $('paused').textContent = settings.paused ? '继续 ▷' : '暂停 Ⅱ';
-  $('visible').textContent = settings.visible ? '隐藏蜘蛛' : '显示蜘蛛';
+  $('paused').textContent = settings.paused ? strings.resume : strings.pause;
+  $('visible').textContent = settings.visible ? strings.hide : strings.show;
   $('allowCrossScreen').setAttribute('aria-pressed', String(settings.allowCrossScreen));
   $('status').classList.remove('error');
-  $('status').textContent = !settings.visible ? '蜘蛛已隐藏，可随时重新显示。'
-    : settings.paused ? '已暂停，继续后恢复活动和点击互动。'
-    : '⌘ Command + 单击冲刺前往，鼠标可正常操作其他应用。';
+  $('status').textContent = !settings.visible ? strings.hiddenStatus
+    : settings.paused ? strings.pausedStatus : strings.readyStatus;
 }
 
 function send(type, value) {

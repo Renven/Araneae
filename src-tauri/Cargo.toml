@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 block2 = "=0.6.2"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSWindow", "NSResponder", "NSScreen", "NSEvent", "block2"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry", "NSLocale", "NSArray", "NSString"] }
 
 [profile.release]
 lto = true

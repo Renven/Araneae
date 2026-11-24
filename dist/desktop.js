@@ -3,6 +3,7 @@ import {applySettings} from './desktop-adapter.js';
 import {createDesktopClock} from './desktop-clock.js';
 import {createContentBounds, chooseViewport} from './desktop-viewport.js';
 import {DesktopBehavior} from './desktop-behavior.js';
+import {desktopStrings, localizeDesktop} from './desktop-i18n.js';
 import {desktopBounds, nearestScreen, clampPoint, contains, distance} from './desktop-routing.js';
 
 const frame = document.getElementById('original');
@@ -14,12 +15,13 @@ let stopped = false, placing = false, readingCursor = false, readingLayout = fal
 let resetCrop = true, styledViewport = null;
 let lastPlaced = null, topology = '';
 const cleanup = [];
+let strings = desktopStrings();
 const raycaster = new THREE.Raycaster();
 const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 function report(error) {
   console.error('Desktop pet operation failed:', error);
-  errorBox.textContent = '桌宠运行遇到问题。请从菜单栏的 Araneae 小眼睛图标退出后重新打开。' + String(error);
+  errorBox.textContent = strings.petFailed + String(error);
   errorBox.hidden = false;
 }
 
@@ -51,6 +53,10 @@ function recoverPosition(point) {
 }
 
 function apply(next) {
+  if (!settings || settings.language !== next.language) {
+    strings = localizeDesktop(document, next.language);
+    frame.title = strings.petArea;
+  }
   const crossingChanged = settings && settings.allowCrossScreen !== next.allowCrossScreen;
   const reroute = settings && (settings.mode !== next.mode || settings.wholeScreen !== next.wholeScreen || crossingChanged);
   const suspended = settings && (settings.paused || !settings.visible);

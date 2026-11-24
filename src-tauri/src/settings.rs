@@ -1,3 +1,4 @@
+use crate::language::Language;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -11,6 +12,7 @@ pub enum Mode {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    pub language: Language,
     pub mode: Mode,
     pub speed: f64,
     pub size: f64,
@@ -25,6 +27,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            language: Language::system(),
             mode: Mode::Roam,
             speed: 1.25,
             size: 0.5,
