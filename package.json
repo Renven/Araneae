@@ -1,0 +1,24 @@
+{
+  "name": "shadow-spider",
+  "version": "12.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Araneae：程序化建模、抓地步态与快速转向的桌面浏览器蜘蛛",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check dist/app.js && node --check dist/organic.js && node --check dist/motion.js && node --check dist/gait.js && node --check dist/leg-safety.js && node --check dist/patrol.js && node --check dist/skid-effects.js && node --check dist/desktop.js && node --check dist/desktop-behavior.js",
+    "test:gait": "node scripts/check-gait.mjs",
+    "test:burst": "node scripts/check-gait.mjs --route",
+    "test:inertia": "node scripts/check-inertia.mjs",
+    "test:anchor": "node scripts/check-gait.mjs --anchor",
+    "test:patrol": "node scripts/check-patrol.mjs",
+    "test:sprint": "node scripts/check-sprint.mjs",
+    "desktop:dev": "cargo tauri dev",
+    "desktop:build": "cargo tauri build --bundles app -- --locked",
+    "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml --locked",
+    "desktop:test": "node --test scripts/check-desktop-routing.mjs scripts/check-desktop-clock.mjs scripts/check-desktop-viewport.mjs && node scripts/check-desktop-motion.mjs && cargo test --manifest-path src-tauri/Cargo.toml --locked"
+  }
+}

@@ -1,0 +1,20 @@
+/src-tauri/target/
+/src-tauri/gen/
+/node_modules/
+.DS_Store
+/影蛛.app
+/Pip.app
+/Araneae.app
+/output/
+/docs/plans/
+
+# Local environment files and signing credentials.
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+/id_rsa*
+/id_ed25519*

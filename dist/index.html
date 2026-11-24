@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#eeede8">
+  <title>Araneae — 屏幕上的蜘蛛</title>
+  <meta name="description" content="仿真蜘蛛，带有清晰的分节、细毛和自然纹理，在屏幕上自由探索。">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="stage" aria-label="蜘蛛爬行区域"></div>
+  <div class="grain"></div>
+  <header>
+    <a class="brand" href="./" aria-label="Araneae 首页"><img src="araneae-mark.svg" width="32" height="32" alt=""><span>Araneae</span></a>
+    <div class="live"><span></span><span id="stateLabel">正在探索</span></div>
+    <div class="top-actions"><button id="theme" class="icon-button" aria-label="切换深浅背景" title="切换深浅背景"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></button><button id="fullscreen" class="icon-button" aria-label="全屏" title="全屏"><svg viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button></div>
+  </header>
+  <div class="coordinate" id="coordinates">X 0000 · Y 0000</div>
+  <main class="intro"><div class="eyebrow">A LITTLE DESKTOP COMPANION</div><h1>Araneae</h1><p>走走停停，留意四周的动静。</p><div class="intro-foot"><span class="tiny-line"></span> 原创形态 · 程序化步态</div></main>
+  <aside class="controls" aria-label="动作控制面板">
+    <div class="panel-head"><span>行为控制</span><span class="serial">Araneae</span></div>
+    <div class="modes" role="group" aria-label="行为模式"><button data-mode="roam" class="selected">自主巡逻</button><button data-mode="follow">跟随鼠标</button><button data-mode="observe">原地观察</button></div>
+    <label class="range-row"><span>爬行速度</span><input id="speed" type="range" min="0.35" max="3" step="0.05" value="1.25" aria-label="爬行速度"><output id="speedValue">1.25×</output></label>
+    <label class="range-row"><span>身体大小</span><input id="size" type="range" min="0.35" max="2.1" step="0.05" value="0.5" aria-label="身体大小"><output id="sizeValue">0.50×</output></label>
+    <div class="panel-bottom"><button id="feet" class="toggle" aria-pressed="false"><span class="switch"></span>显示落脚点</button><button id="pause" class="text-button">暂停 <span>Ⅱ</span></button></div>
+  </aside>
+  <footer><span>蓄力 / 阔步爆发 / 惯性刹车</span><span id="hint">单击走过去 · 双击全速冲刺 <span class="key">↗</span></span></footer>
+  <div id="error" hidden>三维画面未能启动，请使用开启硬件加速的 Chrome 或 Safari 刷新重试。</div>
+  <script type="module" src="app.js?v=18"></script>
+</body></html>

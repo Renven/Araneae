@@ -1,0 +1,30 @@
+/* This file is loaded only by the new desktop entry points. */
+html:has(.pet-host), .pet-host { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+.pet-host iframe { display: block; position: fixed; top: 0; left: 0; border: 0; visibility: hidden; }
+.pet-host iframe.ready { visibility: visible; }
+.desktop-pet, .desktop-pet body, .desktop-pet body.dark { background: transparent !important; }
+.desktop-pet #stage { background: none !important; }
+.desktop-pet .grain, .desktop-pet header, .desktop-pet .coordinate,
+.desktop-pet .intro, .desktop-pet .controls, .desktop-pet footer { display: none !important; }
+#desktopError { position: fixed; top: 40px; left: 40px; max-width: 460px; padding: 18px 22px; border: 1px solid #b57d36; background: #f7f7f2; color: #252a29; font: 13px/1.8 "PingFang SC", sans-serif; }
+#desktopError[hidden] { display: none; }
+.desktop-controls { overflow: auto; min-height: 100vh; padding: 28px 24px 22px; font-family: "Helvetica Neue", "PingFang SC", sans-serif; }
+.desktop-controls .desktop-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.desktop-mark { width: 42px; height: 42px; color: var(--ink); flex-shrink: 0; }
+.desktop-controls h1 { margin: 0; font-size: 23px; font-weight: 500; letter-spacing: 3px; }
+.desktop-controls .eyebrow { margin: 6px 0 0; font: 9px monospace; letter-spacing: 1.4px; }
+.desktop-controls .controls { position: static; width: 100%; padding: 20px; border-radius: 12px; }
+.desktop-controls fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
+.desktop-controls fieldset:disabled { opacity: .55; }
+.desktop-controls .modes { margin-bottom: 23px; }
+.desktop-controls .range-row { margin-bottom: 21px; font-size: 11px; }
+.desktop-controls .range-row > span { width: 56px; }
+.desktop-controls .panel-bottom { margin-top: 7px; }
+.desktop-controls .cross-screen-toggle { margin: 0 0 18px; font-size: 11px; }
+.desktop-controls #visible { padding: 8px 11px; border: 1px solid var(--line); border-radius: 5px; background: transparent; font-size: 11px; }
+.desktop-controls #visible:hover { background: var(--panel); }
+.desktop-note { margin: 20px 0 0; color: var(--muted); font-size: 11px; line-height: 1.9; }
+.desktop-note strong { color: var(--ink); font-weight: 500; }
+.desktop-status { color: var(--muted); font-size: 11px; line-height: 1.8; margin: 17px 0 0; }
+.desktop-status.error { color: #a33e27; }
+.desktop-controls .text-button { font-size: 11px; }
