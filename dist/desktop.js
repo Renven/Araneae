@@ -5,17 +5,16 @@ import {createContentBounds, chooseViewport} from './desktop-viewport.js';
 import {DesktopBehavior} from './desktop-behavior.js';
 import {desktopStrings, localizeDesktop} from './desktop-i18n.js';
 import {desktopBounds, nearestScreen, clampPoint, contains, distance} from './desktop-routing.js';
-import {SilkTrail} from './silk-trail.js';
 
 const frame = document.getElementById('original');
 const errorBox = document.getElementById('desktopError');
 const {invoke} = window.__TAURI__.core;
 const {listen} = window.__TAURI__.event;
-let settings, page, spider, screens, bounds, behavior, viewport, clock, measureContent, silkTrail;
+let settings, page, spider, screens, bounds, behavior, viewport, clock, measureContent;
 let shadowLight = null, shadowHalf = 0;
 let baseScale = 1;
 let stopped = false, placing = false, readingCursor = false, readingLayout = false;
-let resetCrop = true, styledViewport = null, boundsFrame = 0, lastTrailAt = 0;
+let resetCrop = true, styledViewport = null, boundsFrame = 0;
 let lastPlaced = null, topology = '';
 let cursorFailures = 0, cursorErrorShown = false;
 const cleanup = [];
@@ -62,7 +61,6 @@ function recoverPosition(point) {
   spider.velocity.set(0, 0, 0);
   spider.cancelManual();
   spider.legs.forEach(leg => { leg.initialized = false; leg.stepping = false; });
-  silkTrail?.reset();
 }
 
 function apply(next) {
@@ -74,7 +72,6 @@ function apply(next) {
   const reroute = settings && (settings.mode !== next.mode || settings.wholeScreen !== next.wholeScreen || crossingChanged);
   const suspended = settings && (settings.paused || !settings.visible);
   if (settings && settings.size !== next.size) resetCrop = true;
-  if (!next.visible) silkTrail?.reset();
   settings = next;
   if (reroute && spider) spider.cancelManual();
   if (crossingChanged && spider) {
@@ -235,7 +232,7 @@ function updateAdaptivePacing() {
   if (!clock || settings?.platform !== 'windows') return;
   const speed = spider.velocity.length();
   const stepping = spider.legs.some(leg => leg.stepping);
-  if (spider.sprinting || spider.motion.arriving || speed > 140 * settings.size) {
+  if (spider.sprinting || spider.motion.arriving) {
     clock.setIntervalMs(1000 / 60);
   } else if (speed > 1.5 || stepping) {
     clock.setIntervalMs(1000 / 45);
@@ -274,8 +271,6 @@ function attachRenderer() {
       shadowLight.shadow.mapSize.set(512, 512);
       shadowLight.shadow.radius = 2;
     }
-    silkTrail = new SilkTrail(spider.scene, undefined, frame.contentWindow);
-    cleanup.push(() => { silkTrail?.dispose(); silkTrail = null; });
     measureContent = createContentBounds(spider.scene, spider.camera);
   }
   const originalRender = renderer.render.bind(renderer);
@@ -285,12 +280,6 @@ function attachRenderer() {
     syncViewportDomAndNative(point);
     updateAdaptivePacing();
     if (!renderer.isWebGLRenderer) return originalRender(scene, camera);
-    const now = performance.now();
-    const trailDt = lastTrailAt ? (now - lastTrailAt) / 1000 : 0;
-    lastTrailAt = now;
-    if (!settings.paused && silkTrail) {
-      silkTrail.update(trailDt, spider, Math.min(viewport.width, viewport.height) * 0.44);
-    }
     updateTightShadow();
     // Crop only the render. Physics, camera projection and all original input handlers
     // keep using the full virtual desktop and the original simulation state.

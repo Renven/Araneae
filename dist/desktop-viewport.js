@@ -31,7 +31,7 @@ export function createContentBounds(scene, camera) {
     };
     scene.traverseVisible(object => {
       const geometry = object.geometry;
-      if (!geometry || object.material?.isShadowMaterial || object.userData?.ignoreContentBounds) return;
+      if (!geometry || object.material?.isShadowMaterial) return;
       const position = geometry.getAttribute('position');
       if (!position) return;
       let cached = boxes.get(geometry);
