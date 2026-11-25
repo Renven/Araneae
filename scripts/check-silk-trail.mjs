@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import * as THREE from '../dist/assets/three.module.js';
 import {SilkTrail} from '../dist/silk-trail.js';
 import {createContentBounds} from '../dist/desktop-viewport.js';
@@ -74,5 +75,17 @@ test('silk trail is ignored by content bounds and feathers alpha to zero before 
   trail.reset();
   assert.equal(trail.count, 0);
   assert.equal(trail.filament.mesh.visible, false);
+  trail.dispose();
+});
+
+test('silk trail allocates TypedArrays from the provided renderer realm for cross-iframe WebGL', () => {
+  const childRealm = vm.runInNewContext('({Float32Array, Uint16Array})');
+  const scene = new THREE.Scene();
+  const trail = new SilkTrail(scene, 1.6, childRealm);
+  assert(trail.filament.positions instanceof childRealm.Float32Array);
+  assert(trail.filament.colors instanceof childRealm.Float32Array);
+  assert(trail.filament.geometry.index.array instanceof childRealm.Uint16Array);
+  assert(trail.halo.positions instanceof childRealm.Float32Array);
+  assert(trail.halo.geometry.index.array instanceof childRealm.Uint16Array);
   trail.dispose();
 });

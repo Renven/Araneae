@@ -238,9 +238,9 @@ function updateAdaptivePacing() {
   if (spider.sprinting || spider.motion.arriving || speed > 140 * settings.size) {
     clock.setIntervalMs(1000 / 60);
   } else if (speed > 1.5 || stepping) {
-    clock.setIntervalMs(1000 / 36);
+    clock.setIntervalMs(1000 / 45);
   } else {
-    clock.setIntervalMs(1000 / 20);
+    clock.setIntervalMs(1000 / 24);
   }
 }
 
@@ -274,7 +274,7 @@ function attachRenderer() {
       shadowLight.shadow.mapSize.set(512, 512);
       shadowLight.shadow.radius = 2;
     }
-    silkTrail = new SilkTrail(spider.scene);
+    silkTrail = new SilkTrail(spider.scene, undefined, frame.contentWindow);
     cleanup.push(() => { silkTrail?.dispose(); silkTrail = null; });
     measureContent = createContentBounds(spider.scene, spider.camera);
   }

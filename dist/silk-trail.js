@@ -9,11 +9,15 @@ function smoothstep(edge0, edge1, x) {
   return t * t * (3 - 2 * t);
 }
 
-function createRibbon(maxPoints, colorRgb, renderOrder) {
+function createRibbon(maxPoints, colorRgb, renderOrder, realm) {
   const vertexCount = maxPoints * 2;
-  const positions = new Float32Array(vertexCount * 3);
-  const colors = new Float32Array(vertexCount * 4);
-  const indices = new Uint16Array((maxPoints - 1) * 6);
+  // Allocate TypedArrays from the renderer's JS realm (child iframe) so Three.js
+  // WebGLAttributes `instanceof Float32Array / Uint16Array` checks succeed.
+  const Float32 = realm?.Float32Array ?? Float32Array;
+  const Uint16 = realm?.Uint16Array ?? Uint16Array;
+  const positions = new Float32(vertexCount * 3);
+  const colors = new Float32(vertexCount * 4);
+  const indices = new Uint16((maxPoints - 1) * 6);
   for (let i = 0; i < maxPoints - 1; i++) {
     const v = i * 2;
     const o = i * 6;
@@ -56,15 +60,15 @@ function createRibbon(maxPoints, colorRgb, renderOrder) {
 // Pre-allocated buffers avoid per-frame garbage collection, and edge feathering prevents
 // clipping or resizing of the cropped desktop overlay window.
 export class SilkTrail {
-  constructor(scene, lifetime = LIFETIME) {
+  constructor(scene, lifetime = LIFETIME, realm = globalThis) {
     this.scene = scene;
     this.lifetime = lifetime;
     this.points = Array.from({length: MAX_POINTS}, () => ({x: 0, z: 0, age: 0}));
     this.count = 0;
     this.tip = new THREE.Vector3();
     // Cool-slate halo ensures contrast on bright pages; silver-white core gleams on dark pages.
-    this.halo = createRibbon(MAX_POINTS, [0.18, 0.24, 0.34], 1);
-    this.filament = createRibbon(MAX_POINTS, [0.94, 0.97, 1.0], 2);
+    this.halo = createRibbon(MAX_POINTS, [0.18, 0.24, 0.34], 1, realm);
+    this.filament = createRibbon(MAX_POINTS, [0.94, 0.97, 1.0], 2, realm);
     scene.add(this.halo.mesh);
     scene.add(this.filament.mesh);
   }
