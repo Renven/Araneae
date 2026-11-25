@@ -56,7 +56,7 @@ fn update(app: &tauri::AppHandle, command: Command) -> DesktopResult<Settings> {
     let window = pet(app)?;
     if previous.visible != next.visible {
         if next.visible {
-            window.show().map_err(|e| e.to_string())?;
+            show_pet_window(&window)?;
         } else {
             window.hide().map_err(|e| e.to_string())?;
         }
@@ -65,6 +65,10 @@ fn update(app: &tauri::AppHandle, command: Command) -> DesktopResult<Settings> {
         .0
         .lock()
         .map_err(|e| e.to_string())? = next.clone();
+    let base_scale = cached_layout(app)
+        .map(|layout| layout.base_scale)
+        .unwrap_or(1.0);
+    interaction::sync_settings(&next, base_scale);
     app.emit_to("pet", "pet-settings", &next)
         .map_err(|e| e.to_string())?;
     app.emit_to("controls", "pet-settings", &next)
@@ -88,13 +92,20 @@ fn update_settings(
     update(&app, command)
 }
 
+fn show_pet_window(window: &WebviewWindow) -> DesktopResult<()> {
+    window.show().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    ensure_windows_overlay_style(window).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn pet_ready(window: WebviewWindow, app: tauri::AppHandle, renderer: String) -> DesktopResult<()> {
     if window.label() != "pet" {
         return Err("Only the pet window can report readiness".into());
     }
     if settings(&app)?.visible {
-        window.show().map_err(|e| e.to_string())?;
+        show_pet_window(&window)?;
     }
     eprintln!("Desktop pet ready ({renderer}): {:?}", window.inner_size());
     Ok(())
@@ -162,6 +173,9 @@ fn start_frame_clock(app: tauri::AppHandle) {
 fn desktop_layout(window: WebviewWindow, app: tauri::AppHandle) -> DesktopResult<desktop::Layout> {
     authorize_pet(&window)?;
     let layout = desktop::layout(&window)?;
+    if let Ok(current_settings) = settings(&app) {
+        interaction::sync_settings(&current_settings, layout.base_scale);
+    }
     app.state::<ScreenState>()
         .0
         .lock()
@@ -256,6 +270,9 @@ fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
             .build()
             .map_err(|e| e.to_string())?,
     };
+    if window.is_minimized().unwrap_or(false) {
+        window.unminimize().map_err(|e| e.to_string())?;
+    }
     window.show().map_err(|e| e.to_string())?;
     if !original {
         desktop::set_level(&window, None)?;
@@ -374,16 +391,13 @@ fn apply_pet_ex_style(current: isize, no_activate: isize, tool_window: isize) ->
 }
 
 #[cfg(target_os = "windows")]
-fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
-    use std::mem::size_of;
+fn ensure_windows_overlay_style(window: &WebviewWindow) -> tauri::Result<()> {
     use windows_sys::Win32::{
-        Foundation::{HWND, S_OK},
-        Graphics::Dwm::{
-            DwmSetWindowAttribute, DWMWCP_DONOTROUND, DWMWA_WINDOW_CORNER_PREFERENCE,
-        },
+        Foundation::HWND,
         UI::WindowsAndMessaging::{
             GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW,
         },
     };
     let hwnd = window.hwnd()?.0 as HWND;
@@ -396,6 +410,31 @@ fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
     if updated != current {
         unsafe { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, updated) };
     }
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
+    use std::mem::size_of;
+    use windows_sys::Win32::{
+        Foundation::{HWND, S_OK},
+        Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWCP_DONOTROUND, DWMWA_WINDOW_CORNER_PREFERENCE,
+        },
+    };
+    ensure_windows_overlay_style(window)?;
+    let hwnd = window.hwnd()?.0 as HWND;
     // Windows 11 Build 22000+ supports disabling rounded corners; gracefully ignore on Windows 10.
     let corner_pref = DWMWCP_DONOTROUND;
     let hr = unsafe {
@@ -408,17 +447,6 @@ fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
     };
     if hr != S_OK {
         eprintln!("DWMWA_WINDOW_CORNER_PREFERENCE unsupported or ignored (HRESULT={hr:#x})");
-    }
-    unsafe {
-        SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-        );
     }
     Ok(())
 }
