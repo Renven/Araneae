@@ -13,6 +13,11 @@ export function applySettings(page, spider, settings) {
   }
   if (spider.state.feet !== settings.feet) click('feet');
   if (spider.state.dark !== settings.dark) click('theme');
+  if (spider.appearance?.setAppearance) {
+    spider.appearance.setAppearance(settings.color ?? null, settings.preset ?? null);
+  } else if (spider.appearance?.setColor) {
+    spider.appearance.setColor(settings.color ?? null);
+  }
   const paused = settings.paused || !settings.visible;
   if (spider.state.paused !== paused) click('pause');
 }

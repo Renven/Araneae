@@ -20,7 +20,18 @@ function makeSurfaceMaps(){
   const r=Math.round(116+noise*57+h*15);roughness[i]=roughness[i+1]=roughness[i+2]=r;roughness[i+3]=255;
  }
  const texture=(data,color=false)=>{const t=new THREE.DataTexture(data,n,n,THREE.RGBAFormat);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.generateMipmaps=true;t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;if(color)t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;return t;};
- return {map:texture(albedo,true),normalMap:texture(normal),roughnessMap:texture(roughness)};
+ return {map:texture(albedo,true),normalMap:texture(normal),roughnessMap:texture(roughness),heights,albedo};
+}
+function paintAlbedo(r,g,b){
+ const {albedo,heights,map}=surfaceMaps;
+ for(let j=0;j<heights.length;j++){
+  const i=j*4,tone=.83+heights[j]*.35;
+  albedo[i]=Math.min(255,Math.max(0,Math.round(r*tone)));
+  albedo[i+1]=Math.min(255,Math.max(0,Math.round(g*tone)));
+  albedo[i+2]=Math.min(255,Math.max(0,Math.round(b*tone)));
+  albedo[i+3]=255;
+ }
+ map.needsUpdate=true;
 }
 function makeResources(){
  sphere=new THREE.SphereGeometry(1,64,48);
@@ -28,7 +39,8 @@ function makeResources(){
  const bonePositions=boneGeometry.attributes.position;
  for(let i=0;i<bonePositions.count;i++){const y=bonePositions.getY(i);bonePositions.setX(i,bonePositions.getX(i)*.8+.2*Math.sin((y+.5)*Math.PI));bonePositions.setZ(i,bonePositions.getZ(i)*.704);}bonePositions.needsUpdate=true;boneGeometry.computeVertexNormals();
  surfaceMaps=makeSurfaceMaps();
- chitin=new THREE.MeshPhysicalMaterial({color:'#c3d2e1',...surfaceMaps,roughness:.84,normalScale:new THREE.Vector2(.27,.2),metalness:.015,clearcoat:.17,clearcoatRoughness:.35,sheen:.18,sheenColor:new THREE.Color('#2b536b'),sheenRoughness:.55,iridescence:.16,iridescenceIOR:1.25,iridescenceThicknessRange:[90,160]});
+ const maps={map:surfaceMaps.map,normalMap:surfaceMaps.normalMap,roughnessMap:surfaceMaps.roughnessMap};
+ chitin=new THREE.MeshPhysicalMaterial({color:'#c3d2e1',...maps,roughness:.84,normalScale:new THREE.Vector2(.27,.2),metalness:.015,clearcoat:.17,clearcoatRoughness:.35,sheen:.18,sheenColor:new THREE.Color('#2b536b'),sheenRoughness:.55,iridescence:.16,iridescenceIOR:1.25,iridescenceThicknessRange:[90,160]});
  jointMaterial=new THREE.MeshPhysicalMaterial({color:'#121820',roughness:.43,metalness:0,clearcoat:.22,clearcoatRoughness:.34,normalMap:surfaceMaps.normalMap,normalScale:new THREE.Vector2(.25,.25)});
  cuffMaterial=new THREE.MeshStandardMaterial({color:'#202329',roughness:.72});
  eyeMaterial=new THREE.MeshPhysicalMaterial({color:'#06121e',roughness:.035,metalness:.06,ior:1.52,clearcoat:1,clearcoatRoughness:.02,specularIntensity:1.2});
@@ -40,6 +52,18 @@ function makeResources(){
  hairMaterial=new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:.4,depthWrite:false,side:THREE.BackSide});
  hairFrontMaterial=hairMaterial.clone();hairFrontMaterial.side=THREE.FrontSide;
 }
+const SPIDER_PRESETS={
+ 'black-widow':{thorax:'#14161c',abdomen:'#191216',legs:'#12141a',joints:'#0d0e13',sheen:'#d61f2c',abdomenSheen:'#f02838',socket:'#1f1014',iris:'#ef2b36',irisGlow:'#7a0d14',hairShort:'#1e2028',hairLong:'#592028'},
+ 'redknee':{thorax:'#2a211d',abdomen:'#231c18',legs:'#261e1a',joints:'#e8651a',sheen:'#a85a2b',abdomenSheen:'#8a4b25',socket:'#3a2216',iris:'#f08832',irisGlow:'#7d380c',hairShort:'#5a3c29',hairLong:'#d97b38'},
+ 'peacock':{thorax:'#1e7eb8',abdomen:'#d6552c',legs:'#26425c',joints:'#199fb8',sheen:'#2fd4d4',abdomenSheen:'#f2b632',socket:'#184a68',iris:'#3ae2e8',irisGlow:'#12697a',hairShort:'#2b647d',hairLong:'#e69d3c'},
+ 'wandering':{thorax:'#7a5739',abdomen:'#694a30',legs:'#5c402a',joints:'#332114',sheen:'#a67a50',abdomenSheen:'#8f6743',socket:'#542117',iris:'#d9462b',irisGlow:'#6e1a0d',hairShort:'#6e4e35',hairLong:'#99714d'},
+ 'funnel-web':{thorax:'#151923',abdomen:'#11141c',legs:'#161b26',joints:'#0c0f15',sheen:'#4b5e78',abdomenSheen:'#38475e',socket:'#1a2433',iris:'#7cb4e0',irisGlow:'#264663',hairShort:'#212938',hairLong:'#3d4c63'},
+ 'wolf':{thorax:'#695d4f',abdomen:'#5c5144',legs:'#5e5346',joints:'#2f2820',sheen:'#8f8270',abdomenSheen:'#7d705f',socket:'#353024',iris:'#9ec954',irisGlow:'#415c19',hairShort:'#5e5346',hairLong:'#9c8f7d'},
+ 'golden-orb':{thorax:'#8f7a44',abdomen:'#d9a82e',legs:'#332b1c',joints:'#1f1910',sheen:'#f0cb54',abdomenSheen:'#ffe070',socket:'#473918',iris:'#f0c03e',irisGlow:'#73560d',hairShort:'#6e5826',hairLong:'#cfa63c'},
+ 'goliath':{thorax:'#693924',abdomen:'#5c301d',legs:'#5e321f',joints:'#33190e',sheen:'#9c5534',abdomenSheen:'#8c4b2d',socket:'#422012',iris:'#c9713c',irisGlow:'#5e2d10',hairShort:'#754026',hairLong:'#b0643b'},
+ 'huntsman':{thorax:'#a88459',abdomen:'#96744c',legs:'#82633f',joints:'#4a3520',sheen:'#decba8',abdomenSheen:'#c9b48d',socket:'#544028',iris:'#d9b673',irisGlow:'#634c22',hairShort:'#8f6f49',hairLong:'#c7a97b'},
+ 'crab':{thorax:'#e0c43a',abdomen:'#edd44c',legs:'#c7ad34',joints:'#a88e26',sheen:'#f5e27a',abdomenSheen:'#e37482',socket:'#8c7720',iris:'#e06b79',irisGlow:'#752430',hairShort:'#bfa434',hairLong:'#f0dc6e'},
+};
 const palette=['#111720','#293646','#526173','#1c2532','#0d121b'];
 function addMesh(parent,geo,mat){const m=new THREE.Mesh(geo,mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;}
 function ellipsoid(parent,center,radii,material){const m=addMesh(parent,sphere,material);m.position.copy(center);m.scale.copy(radii);return m;}
@@ -138,8 +162,12 @@ export class OrganicAppearance {
    {kind:'abdomen',center:V(0,1,49),radii:V(25,18,31)}
   ];
   this.bodyFur=[];
+  this.bodyMaterials=[];
+  this.hairMeshes=[];
+  this.appearanceKey='default';
   for(let i=0;i<this.parts.length;i++){
    const spec=this.parts[i],skin=bodyMaterial(spec.kind),m=addMesh(body,skin.geometry,skin.material);m.position.copy(spec.center);m.scale.copy(spec.radii);
+   this.bodyMaterials.push(skin.material);
    this.bodyFur.push(...hairs(body,i?240:120,891+i,spec));
   }
   ellipsoid(body,V(0,-3,29),V(6.5,6,10),jointMaterial);
@@ -178,7 +206,78 @@ export class OrganicAppearance {
    const cuffs=[];
    return {leg,bones,nodes,cuffs,radii,points:Array.from({length:6},()=>V()),outward:V(),cuffPoint:V()};
   });
+  // Cache original hair vertex colors so custom color tinting can be cleanly reset.
+  const collectHair=root=>root.traverse(obj=>{
+   if(obj.name==='groomed-setae'&&obj.geometry?.attributes?.color){
+    const attr=obj.geometry.attributes.color;
+    this.hairMeshes.push({attr,original:new Float32Array(attr.array)});
+   }
+  });
+  collectHair(body);
+  for(const leg of legs)collectHair(leg.group);
  }
+ setAppearance(color,preset=null){
+  const validPreset=typeof preset==='string'&&Object.hasOwn(SPIDER_PRESETS,preset.trim().toLowerCase())?preset.trim().toLowerCase():null;
+  const normalizedColor=!validPreset&&typeof color==='string'&&/^#[0-9a-f]{6}$/i.test(color.trim())?color.trim().toLowerCase():null;
+  const key=validPreset?`preset:${validPreset}`:normalizedColor?`color:${normalizedColor}`:'default';
+  if(key===this.appearanceKey)return;
+  this.appearanceKey=key;
+  const paintHairs=(shortHex,longHex)=>{
+   const hairShort=new THREE.Color(shortHex),hairLong=new THREE.Color(longHex);
+   for(const {attr} of this.hairMeshes){
+    const arr=attr.array,count=arr.length/9;
+    for(let i=0;i<count;i++){
+     const c=i%19===0?hairLong:hairShort;
+     for(let j=0;j<3;j++){
+      const f=j===2?.65:1,k=i*9+j*3;
+      arr[k]=c.r*f;arr[k+1]=c.g*f;arr[k+2]=c.b*f;
+     }
+    }
+    attr.needsUpdate=true;
+   }
+  };
+  if(validPreset){
+   const spec=SPIDER_PRESETS[validPreset];
+   // Use neutral organic grain albedo so thorax, abdomen, legs and joints can hold distinct species hues.
+   paintAlbedo(196,196,196);
+   chitin.color.set(spec.legs);chitin.sheenColor.set(spec.sheen);
+   if(this.bodyMaterials[0]){this.bodyMaterials[0].color.set(spec.thorax);this.bodyMaterials[0].sheenColor.set(spec.sheen);}
+   if(this.bodyMaterials[1]){this.bodyMaterials[1].color.set(spec.abdomen);this.bodyMaterials[1].sheenColor.set(spec.abdomenSheen);}
+   jointMaterial.color.set(spec.joints);
+   eyeSocketMaterial.color.set(spec.socket);
+   irisMaterial.color.set(spec.iris);irisMaterial.emissive.set(spec.irisGlow);
+   paintHairs(spec.hairShort,spec.hairLong);
+   return;
+  }
+  if(!normalizedColor){
+   paintAlbedo(21,30,44);
+   chitin.color.set('#c3d2e1');chitin.sheenColor.set('#2b536b');
+   for(const mat of this.bodyMaterials){mat.color.set('#c3d2e1');mat.sheenColor.set('#2b536b');}
+   jointMaterial.color.set('#121820');
+   eyeSocketMaterial.color.set('#172b3b');
+   irisMaterial.color.set('#368fac');irisMaterial.emissive.set('#133f54');
+   for(const {attr,original} of this.hairMeshes){attr.array.set(original);attr.needsUpdate=true;}
+   return;
+  }
+  const base=new THREE.Color(normalizedColor);
+  const r=parseInt(normalizedColor.slice(1,3),16),g=parseInt(normalizedColor.slice(3,5),16),b=parseInt(normalizedColor.slice(5,7),16);
+  // Keep organic chitin depth while letting chosen palette hues read vividly.
+  paintAlbedo(Math.round(r*.72),Math.round(g*.72),Math.round(b*.72));
+  const shellTint=base.clone().lerp(new THREE.Color('#ffffff'),.72);
+  const sheenTint=base.clone().lerp(new THREE.Color('#ffffff'),.25);
+  const jointTint=base.clone().multiplyScalar(.34);
+  const socketTint=base.clone().multiplyScalar(.46);
+  const hsl={h:0,s:0,l:0};base.getHSL(hsl);
+  const irisTint=new THREE.Color().setHSL(hsl.h,Math.min(1,Math.max(.35,hsl.s)),Math.min(.72,Math.max(.38,hsl.l+.16)));
+  const irisGlow=irisTint.clone().multiplyScalar(.42);
+  chitin.color.copy(shellTint);chitin.sheenColor.copy(sheenTint);
+  for(const mat of this.bodyMaterials){mat.color.copy(shellTint);mat.sheenColor.copy(sheenTint);}
+  jointMaterial.color.copy(jointTint);
+  eyeSocketMaterial.color.copy(socketTint);
+  irisMaterial.color.copy(irisTint);irisMaterial.emissive.copy(irisGlow);
+  paintHairs(base.clone().multiplyScalar(.62),base.clone().lerp(new THREE.Color('#ffffff'),.18).multiplyScalar(.82));
+ }
+ setColor(hex){this.setAppearance(hex,null);}
  update(size,heading,gesture={}){
   this.size=size;this.heading=heading;
   this.head.position.copy(this.headOrigin);this.head.position.y+=gesture.headLift||0;

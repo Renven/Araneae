@@ -267,8 +267,8 @@ fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
             "controls",
             language.text("Araneae · Control Panel", "Araneae · 控制面板"),
             "controls.html",
-            408.0,
-            560.0,
+            424.0,
+            740.0,
         )
     };
     let window = match app.get_webview_window(label) {
@@ -278,7 +278,7 @@ fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
             .inner_size(width, height)
             .min_inner_size(
                 if original { 700.0 } else { 380.0 },
-                if original { 560.0 } else { 520.0 },
+                if original { 560.0 } else { 600.0 },
             )
             .center()
             .build()
