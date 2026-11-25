@@ -72,6 +72,8 @@ function render(next) {
   $('paused').textContent = settings.paused ? strings.resume : strings.pause;
   $('visible').textContent = settings.visible ? strings.hide : strings.show;
   $('allowCrossScreen').setAttribute('aria-pressed', String(settings.allowCrossScreen));
+  $('autoStart').hidden = settings.platform !== 'windows';
+  $('autoStart').setAttribute('aria-pressed', String(!!settings.autoStart));
   $('status').classList.remove('error');
   $('status').textContent = !settings.visible ? strings.hiddenStatus
     : settings.paused ? strings.pausedStatus : strings.readyStatus;
@@ -124,7 +126,7 @@ $('colorPicker').addEventListener('input', event => {
 $('resetColor').addEventListener('click', () => {
   sendColor(null);
 });
-for (const key of ['paused', 'visible', 'allowCrossScreen']) {
+for (const key of ['paused', 'visible', 'allowCrossScreen', 'autoStart']) {
   $(key).addEventListener('click', () => send(key, !settings[key]));
 }
 window.addEventListener('keydown', event => {

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
 mod desktop;
 mod interaction;
 mod language;
@@ -77,6 +78,9 @@ fn update(app: &tauri::AppHandle, command: Command) -> DesktopResult<Settings> {
     let previous = settings(app)?;
     let mut next = previous.clone();
     next.apply(command)?;
+    if previous.auto_start != next.auto_start {
+        autostart::set_enabled(next.auto_start)?;
+    }
     let window = pet(app)?;
     if previous.visible != next.visible {
         if next.visible {
@@ -268,7 +272,7 @@ fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
             language.text("Araneae · Control Panel", "Araneae · 控制面板"),
             "controls.html",
             424.0,
-            740.0,
+            776.0,
         )
     };
     let window = match app.get_webview_window(label) {
