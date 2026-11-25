@@ -9,6 +9,19 @@ pub enum Mode {
     Observe,
 }
 
+pub const SPIDER_PRESETS: &[&str] = &[
+    "black-widow",
+    "redknee",
+    "peacock",
+    "wandering",
+    "funnel-web",
+    "wolf",
+    "golden-orb",
+    "goliath",
+    "huntsman",
+    "crab",
+];
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -16,6 +29,8 @@ pub struct Settings {
     pub mode: Mode,
     pub speed: f64,
     pub size: f64,
+    pub color: Option<String>,
+    pub preset: Option<String>,
     pub paused: bool,
     pub feet: bool,
     pub dark: bool,
@@ -31,6 +46,8 @@ impl Default for Settings {
             mode: Mode::Roam,
             speed: 1.25,
             size: 0.5,
+            color: None,
+            preset: None,
             paused: false,
             feet: false,
             dark: false,
@@ -47,6 +64,8 @@ pub enum Command {
     Mode(Mode),
     Speed(f64),
     Size(f64),
+    Color(Option<String>),
+    Preset(Option<String>),
     Paused(bool),
     Feet(bool),
     Dark(bool),
@@ -61,6 +80,14 @@ impl Settings {
             Command::Mode(value) => self.mode = value,
             Command::Speed(value) => self.speed = range(value, 0.35, 3.0)?,
             Command::Size(value) => self.size = range(value, 0.35, 2.1)?,
+            Command::Color(value) => {
+                self.color = validate_color(value)?;
+                self.preset = None;
+            }
+            Command::Preset(value) => {
+                self.preset = validate_preset(value)?;
+                self.color = None;
+            }
             Command::Paused(value) => self.paused = value,
             Command::Feet(value) => self.feet = value,
             Command::Dark(value) => self.dark = value,
@@ -69,6 +96,40 @@ impl Settings {
             Command::AllowCrossScreen(value) => self.allow_cross_screen = value,
         }
         Ok(())
+    }
+}
+
+fn validate_color(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let bytes = trimmed.as_bytes();
+    if bytes.len() == 7
+        && bytes[0] == b'#'
+        && bytes[1..].iter().all(|b| b.is_ascii_hexdigit())
+    {
+        Ok(Some(trimmed.to_ascii_lowercase()))
+    } else {
+        Err("Color must be a #RRGGBB hex string or null".into())
+    }
+}
+
+fn validate_preset(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    if SPIDER_PRESETS.contains(&normalized.as_str()) {
+        Ok(Some(normalized))
+    } else {
+        Err("Unknown spider color preset".into())
     }
 }
 
@@ -101,5 +162,53 @@ mod tests {
             settings.apply(Command::Size(value)).unwrap();
             assert_eq!(settings.size, value);
         }
+    }
+
+    #[test]
+    fn color_setting_validates_hex_and_resets_to_default() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.color, None);
+        settings
+            .apply(Command::Color(Some("#C83E37".into())))
+            .unwrap();
+        assert_eq!(settings.color.as_deref(), Some("#c83e37"));
+
+        for invalid in ["#fff", "red", "123456", "#12345g", "#1234567"] {
+            assert!(settings.apply(Command::Color(Some(invalid.into()))).is_err());
+            assert_eq!(settings.color.as_deref(), Some("#c83e37"));
+        }
+
+        settings.apply(Command::Color(None)).unwrap();
+        assert_eq!(settings.color, None);
+        settings.apply(Command::Color(Some("#2e8b57".into()))).unwrap();
+        settings.apply(Command::Color(Some("".into()))).unwrap();
+        assert_eq!(settings.color, None);
+    }
+
+    #[test]
+    fn preset_setting_validates_known_spiders_and_interoperates_with_color() {
+        let mut settings = Settings::default();
+        assert_eq!(SPIDER_PRESETS.len(), 10);
+        for &id in SPIDER_PRESETS {
+            settings.apply(Command::Preset(Some(id.into()))).unwrap();
+            assert_eq!(settings.preset.as_deref(), Some(id));
+            assert_eq!(settings.color, None);
+        }
+        assert!(settings
+            .apply(Command::Preset(Some("unknown-spider".into())))
+            .is_err());
+        assert_eq!(settings.preset.as_deref(), Some("crab"));
+
+        settings
+            .apply(Command::Color(Some("#c83e37".into())))
+            .unwrap();
+        assert_eq!(settings.color.as_deref(), Some("#c83e37"));
+        assert_eq!(settings.preset, None);
+        settings.apply(Command::Preset(Some("peacock".into()))).unwrap();
+        assert_eq!(settings.preset.as_deref(), Some("peacock"));
+        assert_eq!(settings.color, None);
+        settings.apply(Command::Color(None)).unwrap();
+        assert_eq!(settings.preset, None);
+        assert_eq!(settings.color, None);
     }
 }

@@ -3,9 +3,12 @@ import {desktopStrings, localizeDesktop} from './desktop-i18n.js';
 const {invoke} = window.__TAURI__.core;
 const {listen} = window.__TAURI__.event;
 const $ = id => document.getElementById(id);
+const DEFAULT_PICKER_COLOR = '#243448';
 let settings;
 let strings = desktopStrings();
 let queue = Promise.resolve();
+let pendingColor = undefined;
+let flushingColor = false;
 const disposers = [];
 
 function report(error) {
@@ -14,9 +17,45 @@ function report(error) {
   $('status').textContent = strings.operationFailed + String(error);
 }
 
+const PRESET_LABELS = {
+  'black-widow': 'presetBlackWidow',
+  redknee: 'presetRedknee',
+  peacock: 'presetPeacock',
+  wandering: 'presetWandering',
+  'funnel-web': 'presetFunnelWeb',
+  wolf: 'presetWolf',
+  'golden-orb': 'presetGoldenOrb',
+  goliath: 'presetGoliath',
+  huntsman: 'presetHuntsman',
+  crab: 'presetCrab',
+};
+
+function renderColor(color, preset = null) {
+  const activePreset = typeof preset === 'string' && PRESET_LABELS[preset] ? preset : null;
+  const normalized = !activePreset && typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : null;
+  $('colorValue').textContent = activePreset
+    ? strings[PRESET_LABELS[activePreset]]
+    : normalized ? normalized.toUpperCase() : strings.colorDefault;
+  $('resetColor').disabled = !normalized && !activePreset;
+  if (document.activeElement !== $('colorPicker')) {
+    $('colorPicker').value = normalized ?? DEFAULT_PICKER_COLOR;
+  }
+  document.querySelectorAll('[data-color]').forEach(button => {
+    const selected = normalized === button.dataset.color.toLowerCase();
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  document.querySelectorAll('[data-preset]').forEach(button => {
+    const selected = activePreset === button.dataset.preset;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+}
+
 function render(next) {
   if (!settings || settings.language !== next.language) {
     strings = localizeDesktop(document, next.language);
+    $('colorPicker').parentElement.title = strings.customColor;
   }
   settings = next;
   document.body.classList.toggle('dark', settings.dark);
@@ -29,6 +68,7 @@ function render(next) {
     if (document.activeElement !== $(key)) $(key).value = settings[key];
     $(key + 'Value').textContent = Number($(key).value).toFixed(2) + '×';
   }
+  renderColor(settings.color ?? null, settings.preset ?? null);
   $('paused').textContent = settings.paused ? strings.resume : strings.pause;
   $('visible').textContent = settings.visible ? strings.hide : strings.show;
   $('allowCrossScreen').setAttribute('aria-pressed', String(settings.allowCrossScreen));
@@ -43,6 +83,22 @@ function send(type, value) {
   return queue;
 }
 
+function sendColor(color) {
+  pendingColor = color;
+  renderColor(color);
+  if (flushingColor) return;
+  flushingColor = true;
+  const flush = () => {
+    const value = pendingColor;
+    pendingColor = undefined;
+    send('color', value).finally(() => {
+      if (pendingColor !== undefined) flush();
+      else flushingColor = false;
+    });
+  };
+  flush();
+}
+
 document.querySelectorAll('[data-mode]').forEach(button => {
   button.addEventListener('click', () => send('mode', button.dataset.mode));
 });
@@ -52,6 +108,22 @@ for (const key of ['speed', 'size']) {
     send(key, Number($(key).value));
   });
 }
+document.querySelectorAll('[data-color]').forEach(button => {
+  button.addEventListener('click', () => sendColor(button.dataset.color));
+});
+document.querySelectorAll('[data-preset]').forEach(button => {
+  button.addEventListener('click', () => {
+    pendingColor = undefined;
+    renderColor(null, button.dataset.preset);
+    send('preset', button.dataset.preset);
+  });
+});
+$('colorPicker').addEventListener('input', event => {
+  sendColor(event.target.value);
+});
+$('resetColor').addEventListener('click', () => {
+  sendColor(null);
+});
 for (const key of ['paused', 'visible', 'allowCrossScreen']) {
   $(key).addEventListener('click', () => send(key, !settings[key]));
 }

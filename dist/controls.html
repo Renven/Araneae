@@ -22,6 +22,42 @@
       </div>
       <label class="range-row" for="speed"><span data-i18n="speed">Speed</span><input id="speed" type="range" min="0.35" max="3" step="0.05" value="1.25"><output id="speedValue" for="speed">1.25×</output></label>
       <label class="range-row" for="size"><span data-i18n="size">Size</span><input id="size" type="range" min="0.35" max="2.1" step="0.05" value="0.5"><output id="sizeValue" for="size">0.50×</output></label>
+      <div class="color-section">
+        <div class="color-head">
+          <span data-i18n="color">Color</span>
+          <div class="color-actions">
+            <output id="colorValue" for="colorPicker" data-i18n="colorDefault">Default</output>
+            <button id="resetColor" type="button" class="reset-color-button" data-i18n="resetColor" disabled>Reset Color</button>
+          </div>
+        </div>
+        <div class="color-palette" role="group" aria-label="Color palette" data-i18n-label="colorPaletteLabel">
+          <button type="button" class="swatch" data-color="#c83e37" style="--swatch:#c83e37" aria-label="#c83e37"></button>
+          <button type="button" class="swatch" data-color="#d98a2b" style="--swatch:#d98a2b" aria-label="#d98a2b"></button>
+          <button type="button" class="swatch" data-color="#2e8b57" style="--swatch:#2e8b57" aria-label="#2e8b57"></button>
+          <button type="button" class="swatch" data-color="#3578c6" style="--swatch:#3578c6" aria-label="#3578c6"></button>
+          <button type="button" class="swatch" data-color="#7c4dff" style="--swatch:#7c4dff" aria-label="#7c4dff"></button>
+          <button type="button" class="swatch" data-color="#e06c9f" style="--swatch:#e06c9f" aria-label="#e06c9f"></button>
+          <button type="button" class="swatch" data-color="#dce4ec" style="--swatch:#dce4ec" aria-label="#dce4ec"></button>
+          <label class="picker-wrap" title="Custom color" data-i18n-label="customColor">
+            <input id="colorPicker" type="color" value="#243448" aria-label="Custom color" data-i18n-label="customColor">
+          </label>
+        </div>
+      </div>
+      <div class="preset-section">
+        <div class="preset-head" data-i18n="spiderPresets">Famous Spider Templates</div>
+        <div class="preset-grid" role="group" aria-label="Famous spider color templates" data-i18n-label="spiderPresetsLabel">
+          <button type="button" class="preset-chip" data-preset="black-widow" aria-pressed="false"><span class="preset-dot" style="--c1:#14161c;--c2:#e0242f"></span><span data-i18n="presetBlackWidow">Black Widow</span></button>
+          <button type="button" class="preset-chip" data-preset="redknee" aria-pressed="false"><span class="preset-dot" style="--c1:#261e1a;--c2:#e8651a"></span><span data-i18n="presetRedknee">Mexican Redknee</span></button>
+          <button type="button" class="preset-chip" data-preset="peacock" aria-pressed="false"><span class="preset-dot" style="--c1:#1e7eb8;--c2:#d6552c"></span><span data-i18n="presetPeacock">Peacock Spider</span></button>
+          <button type="button" class="preset-chip" data-preset="wandering" aria-pressed="false"><span class="preset-dot" style="--c1:#7a5739;--c2:#d9462b"></span><span data-i18n="presetWandering">Wandering Spider</span></button>
+          <button type="button" class="preset-chip" data-preset="funnel-web" aria-pressed="false"><span class="preset-dot" style="--c1:#151923;--c2:#6a97bd"></span><span data-i18n="presetFunnelWeb">Sydney Funnel-web</span></button>
+          <button type="button" class="preset-chip" data-preset="wolf" aria-pressed="false"><span class="preset-dot" style="--c1:#695d4f;--c2:#9ec954"></span><span data-i18n="presetWolf">Wolf Spider</span></button>
+          <button type="button" class="preset-chip" data-preset="golden-orb" aria-pressed="false"><span class="preset-dot" style="--c1:#d9a82e;--c2:#2b2316"></span><span data-i18n="presetGoldenOrb">Golden Orb-Weaver</span></button>
+          <button type="button" class="preset-chip" data-preset="goliath" aria-pressed="false"><span class="preset-dot" style="--c1:#693924;--c2:#b0643b"></span><span data-i18n="presetGoliath">Goliath Birdeater</span></button>
+          <button type="button" class="preset-chip" data-preset="huntsman" aria-pressed="false"><span class="preset-dot" style="--c1:#a88459;--c2:#decba8"></span><span data-i18n="presetHuntsman">Huntsman Spider</span></button>
+          <button type="button" class="preset-chip" data-preset="crab" aria-pressed="false"><span class="preset-dot" style="--c1:#edd44c;--c2:#e37482"></span><span data-i18n="presetCrab">Crab Spider</span></button>
+        </div>
+      </div>
       <button id="allowCrossScreen" class="toggle cross-screen-toggle" aria-pressed="true"><span class="switch" aria-hidden="true"></span><span data-i18n="allowCrossScreen">Allow Cross-Display Movement</span></button>
       <div class="panel-bottom">
         <button id="paused" class="text-button">Pause Ⅱ</button>
