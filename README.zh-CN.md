@@ -6,6 +6,10 @@
 
 ![Araneae 网页版演示：浅色背景上的蜘蛛与行为控制面板](docs/images/browser-demo.jpg)
 
+macOS 桌宠可以悬浮在其他应用上方，下面是它在 Google 翻译页面上的效果：
+
+![Araneae macOS 桌宠悬浮在 Google 翻译页面上方](docs/images/desktop-demo.jpg)
+
 一个在屏幕上散步、观察和冲刺的蜘蛛桌宠。使用 **Tauri 2 + Three.js**，身体、八条腿、眼睛和细毛由代码生成，无需外部模型。
 
 桌宠目前面向 **macOS 12 及以上版本**，当前构建在 Apple Silicon Mac 上验证过；Intel Mac、Windows 和 Linux 桌宠尚未验证。项目同时保留可在浏览器中独立运行的网页版。

@@ -6,6 +6,10 @@ English | [简体中文](README.zh-CN.md)
 
 ![Araneae browser demo showing the spider and behavior controls on a light background](docs/images/browser-demo.jpg)
 
+The macOS desktop companion stays visible over other apps, as shown here over Google Translate:
+
+![Araneae desktop companion floating over Google Translate](docs/images/desktop-demo.jpg)
+
 A spider desktop companion that walks, watches, and dashes across your screen. Built with **Tauri 2 + Three.js**, its body, eight legs, eyes, and fine hairs are generated in code, with no external models required.
 
 The desktop companion currently targets **macOS 12 and later**. The current build has been verified on an Apple Silicon Mac; desktop support on Intel Macs, Windows, and Linux has not been verified. The project also includes a standalone browser version.
