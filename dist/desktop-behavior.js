@@ -12,6 +12,7 @@ export class DesktopBehavior {
     this.pointer = null;
     this.routing = false;
     this.manualActive = false;
+    this.manualSource = null;
   }
 
   get preciseArrival() {
@@ -61,12 +62,15 @@ export class DesktopBehavior {
   }
 
   avoid(pointer) {
+    if ((this.manualActive && this.manualSource === 'user')
+      || this.spider.sprinting
+      || this.spider.motion?.arriving) return false;
     if (!this.allowsPoint(pointer)) return false;
     const position = this.project(this.spider.position);
     const target = chooseFleeTarget(this.screens, position, pointer, this.spider.state.size, this.wholeScreen);
     if (!target) return false;
     const world = this.unproject(target);
-    if (!world || !this.manualCommand(world)) return false;
+    if (!world || !this.manualCommand(world, 'avoid')) return false;
     this.spider.patrol.beginTravel('long');
     this.spider.motion.wake();
     const next = this.navigator.points[0];
@@ -76,13 +80,14 @@ export class DesktopBehavior {
 
   cancelManual() {
     this.manualActive = false;
+    this.manualSource = null;
     this.manualTarget = null;
     this.routing = false;
     this.navigator.points = [];
     this.navigator.target = null;
   }
 
-  manualCommand(destination) {
+  manualCommand(destination, source = 'user') {
     if (!this.allowsPoint(this.project(destination))) return false;
     if (!this.navigator.navigate(this.project(this.spider.position), this.project(destination))) return false;
     const motion = this.spider.motion;
@@ -92,6 +97,7 @@ export class DesktopBehavior {
     }
     this.manualTarget = destination.clone();
     this.manualActive = true;
+    this.manualSource = source;
     this.routing = true;
     return true;
   }
@@ -110,6 +116,7 @@ export class DesktopBehavior {
         && (spider.motion.isAtGoal(this.manualTarget, spider.state.size)
           || spider.position.distanceTo(this.manualTarget) <= tolerance)) {
         this.manualActive = false;
+        this.manualSource = null;
         this.routing = false;
       }
       return target ? this.unproject(target) : this.manualTarget;

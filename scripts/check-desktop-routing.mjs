@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {OrthographicCamera, Vector3} from '../dist/assets/three.module.js';
 import {DesktopNavigator, chooseFleeTarget, desktopBounds, routeBetween, contains, distance} from '../dist/desktop-routing.js';
+import {DesktopBehavior} from '../dist/desktop-behavior.js';
 
 const screen = (x, y, width, height, scale = 1) => ({
   frame: {x, y, width, height}, workArea: {x, y: y + 28, width, height: height - 28}, scale,
@@ -91,4 +92,76 @@ test('chooseFleeTarget moves away from pointer and deflects out of screen corner
   const corner = chooseFleeTarget(screens, {x: 90, y: 110}, {x: 150, y: 170}, 0.5);
   assert(contains(screens[0].workArea, corner));
   assert(distance(corner, {x: 150, y: 170}) > 130);
+});
+
+test('unreachable follow fallback respects wholeScreen and stays out of the taskbar', () => {
+  const primary = {
+    frame: {x: 0, y: 0, width: 1920, height: 1080},
+    workArea: {x: 0, y: 0, width: 1840, height: 1080}, // 80px right taskbar
+    scale: 1,
+  };
+  const cornerTouching = {
+    frame: {x: 1920, y: 1080, width: 1920, height: 1080},
+    workArea: {x: 1920, y: 1080, width: 1920, height: 1040},
+    scale: 1,
+  };
+  const screens = [primary, cornerTouching];
+  assert.equal(routeBetween(screens, {x: 800, y: 700}, {x: 2200, y: 1200}), null);
+
+  const workOnly = new DesktopNavigator(screens, false);
+  const safeFallback = workOnly.step({x: 800, y: 700}, 'follow', {x: 2200, y: 1200}, 0.5);
+  assert(contains(primary.workArea, safeFallback), `Expected fallback inside workArea, got ${JSON.stringify(safeFallback)}`);
+  assert(safeFallback.x <= primary.workArea.x + primary.workArea.width - 55);
+
+  const fullFrame = new DesktopNavigator(screens, true);
+  const fullFallback = fullFrame.step({x: 800, y: 700}, 'follow', {x: 2200, y: 1200}, 0.5);
+  assert(contains(primary.frame, fullFallback));
+  assert(fullFallback.x > primary.workArea.x + primary.workArea.width);
+});
+
+test('pointer avoidance does not hijack an active manual dash and resumes after arrival', () => {
+  const screens = [screen(0, 0, 1440, 900)];
+  const spider = {
+    position: new Vector3(500, 0, 500),
+    velocity: new Vector3(0, 0, 0),
+    goal: new Vector3(500, 0, 500),
+    state: {mode: 'roam', size: 0.5},
+    sprinting: false,
+    motion: {
+      arriving: false,
+      skid: null,
+      heading: 0,
+      setPhase() {},
+      wake() {},
+      isAtGoal(goal) { return spider.position.distanceTo(goal) < 2; },
+    },
+    patrol: {observing: false, leg: 'long', random: () => 0.5, beginTravel() {}},
+    cancelManual() { spider.sprinting = false; behavior.cancelManual(); },
+  };
+  const project = v => ({x: v.x, y: v.z});
+  const unproject = p => new Vector3(p.x, 0, p.y);
+  const behavior = new DesktopBehavior(spider, screens, false, project, unproject, screens[0].frame, true);
+
+  // User issues Ctrl + click dash to (585, 500), then nudges pointer 1px to (584, 500).
+  assert.equal(behavior.manualCommand(new Vector3(585, 0, 500)), true);
+  spider.sprinting = true;
+  assert.equal(behavior.avoid({x: 584, y: 500}), false);
+  const duringDash = behavior.updateGoal({autonomous: false, manual: true});
+  assert.equal(duringDash.x, 585);
+  assert.equal(duringDash.z, 500);
+
+  // Once the spider arrives and stops sprinting, avoidance resumes normally.
+  spider.position.set(585, 0, 500);
+  spider.velocity.set(0, 0, 0);
+  behavior.updateGoal({autonomous: false, manual: true});
+  spider.sprinting = false;
+  assert.equal(behavior.manualActive, false);
+  assert.equal(behavior.avoid({x: 584, y: 500}), true);
+  assert(spider.goal.x > 650, `Expected spider to flee away from (584,500), got ${spider.goal.x}`);
+
+  // Consecutive avoidance while already fleeing is still allowed, and a new user command overrides it.
+  assert.equal(behavior.avoid({x: 590, y: 500}), true);
+  assert.equal(behavior.manualCommand(new Vector3(400, 0, 500)), true);
+  assert.equal(behavior.manualSource, 'user');
+  assert.equal(behavior.avoid({x: 590, y: 500}), false);
 });

@@ -50,7 +50,7 @@ On launch, the spider appears on your screen, accompanied by a small eyes icon i
 
 A manual dash preserves the selected behavior mode. In observe mode, the spider resumes observing at its new location after arrival. Changing modes during a dash cancels the manual route. Regular clicks and double-clicks do not command the desktop pet, and mouse events still reach the original application. Clicks inside the control panel or menus do not command the pet.
 
-Speed ranges from **0.35× to 3.00×**, with a default of **1.25×**. Size ranges from **0.35× to 2.10×**, with a default of **0.50×**. Cross-display movement is enabled by default. Settings are currently kept in memory and are not saved after quitting.
+Speed ranges from **0.35× to 3.00×**, with a default of **1.25×**. Size ranges from **0.35× to 2.10×**, with a default of **0.50×**. Cross-display movement is enabled by default. Runtime settings are kept in memory and are not saved after quitting; on Windows, toggling **Launch at Startup** persists a login entry for the current user under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` and reads it back on launch.
 
 ### Multiple Displays and Known Limitations
 
@@ -63,7 +63,7 @@ Speed ranges from **0.35× to 3.00×**, with a default of **1.25×**. Size range
 
 ### Mouse Events and Privacy
 
-The desktop companion uses passive global mouse monitoring to detect dash-clicks in other applications (`Command + click` on macOS; a low-level mouse hook for `Ctrl + click` on Windows). It handles only left-button presses, releases, drag-threshold cancellation, and the corresponding modifier state. It does not log keyboard input in other applications or consume mouse events. The current code includes no telemetry, account login, or data upload functionality.
+The desktop companion uses passive global mouse monitoring to detect dash-clicks in other applications (`Command + click` on macOS; a low-level mouse hook for `Ctrl + click` on Windows). It handles left-button presses, releases, drag-threshold cancellation, and the corresponding modifier state. On Windows, when **Avoid Pointer** is enabled (outside Follow mode), the hook also compares `WM_MOUSEMOVE` pointer proximity against the spider’s local position to trigger avoidance. It does not log keyboard input or mouse movement, and never consumes mouse events. The current code includes no telemetry, account login, or data upload functionality.
 
 ## Running from Source
 

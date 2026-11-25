@@ -71,9 +71,11 @@ function render(next) {
   renderColor(settings.color ?? null, settings.preset ?? null);
   $('paused').textContent = settings.paused ? strings.resume : strings.pause;
   $('visible').textContent = settings.visible ? strings.hide : strings.show;
+  const isWindows = settings.platform === 'windows';
   $('allowCrossScreen').setAttribute('aria-pressed', String(settings.allowCrossScreen));
+  $('avoidPointer').hidden = !isWindows;
   $('avoidPointer').setAttribute('aria-pressed', String(!!settings.avoidPointer));
-  $('autoStart').hidden = settings.platform !== 'windows';
+  $('autoStart').hidden = !isWindows;
   $('autoStart').setAttribute('aria-pressed', String(!!settings.autoStart));
   $('status').classList.remove('error');
   $('status').textContent = !settings.visible ? strings.hiddenStatus

@@ -3,6 +3,17 @@ use crate::settings::{Mode, Settings};
 
 const DRAG_THRESHOLD: f64 = 5.0;
 
+#[cfg(any(target_os = "windows", test))]
+pub fn drag_limit_sq_physical(base_scale: f64) -> i64 {
+    let scale = if base_scale.is_finite() && base_scale > 0.0 {
+        base_scale
+    } else {
+        1.0
+    };
+    let exact = DRAG_THRESHOLD * scale;
+    (exact * exact).floor() as i64
+}
+
 pub fn avoid_radius_logical(size: f64) -> f64 {
     let size = if size.is_finite() && size > 0.0 {
         size
@@ -185,7 +196,7 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::{avoid_radius_logical, should_avoid, ClickGesture, DRAG_THRESHOLD};
+    use super::{avoid_radius_logical, drag_limit_sq_physical, should_avoid, ClickGesture};
     use crate::{desktop, settings::Settings, DesktopResult};
     use serde::Serialize;
     use std::{
@@ -204,10 +215,11 @@ mod platform {
         UI::{
             Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL},
             WindowsAndMessaging::{
-                CallNextHookEx, DispatchMessageW, GetMessageW, GetWindowThreadProcessId,
-                PeekMessageW, PostThreadMessageW, SetWindowsHookExW, TranslateMessage,
-                UnhookWindowsHookEx, WindowFromPoint, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE,
-                WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
+                CallNextHookEx, DispatchMessageW, GetAncestor, GetMessageW,
+                GetWindowThreadProcessId, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
+                TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, MSG,
+                MSLLHOOKSTRUCT, PM_NOREMOVE, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP,
+                WM_MOUSEMOVE, WM_QUIT,
             },
         },
     };
@@ -286,6 +298,7 @@ mod platform {
     }
 
     pub fn sync_settings(settings: &Settings, base_scale: f64) {
+        update_drag_limit(base_scale);
         let scale = if base_scale.is_finite() && base_scale > 0.0 {
             base_scale
         } else {
@@ -294,6 +307,19 @@ mod platform {
         let radius_px = (avoid_radius_logical(settings.size) * scale).round() as i64;
         AVOID_RADIUS_SQ.store(radius_px * radius_px, Ordering::Relaxed);
         AVOID_ENABLED.store(should_avoid(settings), Ordering::Release);
+        if !settings.visible || settings.paused {
+            cancel_active_press();
+        }
+    }
+
+    fn cancel_active_press() {
+        PRESSING.store(false, Ordering::Release);
+        DRAGGED.store(false, Ordering::Release);
+        if let Ok(guard) = event_tx().lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.try_send(RawEvent::Reset);
+            }
+        }
     }
 
     fn event_tx() -> &'static Mutex<Option<SyncSender<RawEvent>>> {
@@ -301,13 +327,7 @@ mod platform {
     }
 
     fn update_drag_limit(base_scale: f64) {
-        let scale = if base_scale.is_finite() && base_scale > 0.0 {
-            base_scale
-        } else {
-            1.0
-        };
-        let px = (DRAG_THRESHOLD * scale).ceil() as i64;
-        DRAG_LIMIT_SQ.store(px * px, Ordering::Relaxed);
+        DRAG_LIMIT_SQ.store(drag_limit_sq_physical(base_scale), Ordering::Relaxed);
     }
 
     fn ctrl_pressed() -> bool {
@@ -319,9 +339,41 @@ mod platform {
         if hwnd.is_null() {
             return false;
         }
+        let self_pid = SELF_PID.load(Ordering::Relaxed);
+        if self_pid == 0 {
+            return false;
+        }
         let mut pid: u32 = 0;
         unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
-        pid != 0 && pid == SELF_PID.load(Ordering::Relaxed)
+        if pid == self_pid {
+            return true;
+        }
+        // WebView2 content lives in a child HWND owned by msedgewebview2.exe;
+        // check the top-level host window (GA_ROOT) so clicks inside our own
+        // controls or original window are excluded.
+        let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+        if !root.is_null() && root != hwnd {
+            let mut root_pid: u32 = 0;
+            unsafe { GetWindowThreadProcessId(root, &mut root_pid) };
+            if root_pid == self_pid {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[cfg(test)]
+    pub fn test_pressing_and_dragged() -> (bool, bool) {
+        (
+            PRESSING.load(Ordering::Acquire),
+            DRAGGED.load(Ordering::Acquire),
+        )
+    }
+
+    #[cfg(test)]
+    pub fn test_set_pressing(pressing: bool, dragged: bool) {
+        PRESSING.store(pressing, Ordering::Release);
+        DRAGGED.store(dragged, Ordering::Release);
     }
 
     fn enqueue(event: RawEvent) {
@@ -701,5 +753,42 @@ mod tests {
         assert_eq!(avoid_radius_logical(0.35), 95.0);
         assert_eq!(avoid_radius_logical(1.0), 160.0);
         assert_eq!(avoid_radius_logical(2.1), 230.0);
+    }
+
+    #[test]
+    fn drag_limit_matches_logical_threshold_at_fractional_dpi() {
+        // 100%: 5.0 logical px == 5 physical px -> 5 stays click, 6 drags.
+        let limit_100 = drag_limit_sq_physical(1.0);
+        assert_eq!(limit_100, 25);
+        assert!(5 * 5 <= limit_100);
+        assert!(6 * 6 > limit_100);
+
+        // 125%: 5.0 logical px == 6.25 physical px -> 6 stays click, 7 (5.6 logical) drags.
+        let limit_125 = drag_limit_sq_physical(1.25);
+        assert_eq!(limit_125, 39);
+        assert!(6 * 6 <= limit_125);
+        assert!(7 * 7 > limit_125);
+
+        // 150%: 5.0 logical px == 7.5 physical px -> 7 stays click, 8 (5.333 logical) drags.
+        let limit_150 = drag_limit_sq_physical(1.5);
+        assert_eq!(limit_150, 56);
+        assert!(7 * 7 <= limit_150);
+        assert!(8 * 8 > limit_150);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn sync_settings_clears_active_press_on_pause_or_hide() {
+        platform::test_set_pressing(true, false);
+        let mut settings = Settings::default();
+        settings.paused = true;
+        sync_settings(&settings, 1.5);
+        assert_eq!(platform::test_pressing_and_dragged(), (false, false));
+
+        platform::test_set_pressing(true, true);
+        settings.paused = false;
+        settings.visible = false;
+        sync_settings(&settings, 1.5);
+        assert_eq!(platform::test_pressing_and_dragged(), (false, false));
     }
 }
