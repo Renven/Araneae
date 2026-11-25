@@ -93,6 +93,9 @@ fn update(app: &tauri::AppHandle, command: Command) -> DesktopResult<Settings> {
         .0
         .lock()
         .map_err(|e| e.to_string())? = next.clone();
+    if let Ok(layout) = cached_layout(app) {
+        interaction::sync_settings(&next, layout.base_scale);
+    }
     app.emit_to("pet", "pet-settings", &next)
         .map_err(|e| e.to_string())?;
     app.emit_to("controls", "pet-settings", &next)
@@ -194,6 +197,9 @@ fn start_frame_clock(app: tauri::AppHandle) {
 fn desktop_layout(window: WebviewWindow, app: tauri::AppHandle) -> DesktopResult<desktop::Layout> {
     authorize_pet(&window)?;
     let layout = desktop::layout(&window)?;
+    if let Ok(current_settings) = settings(&app) {
+        interaction::sync_settings(&current_settings, layout.base_scale);
+    }
     app.state::<ScreenState>()
         .0
         .lock()
@@ -234,6 +240,7 @@ fn place_viewport(
         return Err("Pet coordinates must be finite".into());
     }
     let layout = cached_layout(&app)?;
+    interaction::update_spider(center, layout.base_scale);
     let actual = desktop::place(&window, bounds, &layout)?;
     let screen = layout
         .screens
@@ -272,7 +279,7 @@ fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
             language.text("Araneae · Control Panel", "Araneae · 控制面板"),
             "controls.html",
             424.0,
-            776.0,
+            810.0,
         )
     };
     let window = match app.get_webview_window(label) {

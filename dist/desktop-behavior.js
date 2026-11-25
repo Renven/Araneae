@@ -1,5 +1,5 @@
 import {Vector3} from './assets/three.module.js';
-import {DesktopNavigator, nearestScreen, clampPoint, contains, distance} from './desktop-routing.js';
+import {DesktopNavigator, chooseFleeTarget, nearestScreen, clampPoint, contains, distance} from './desktop-routing.js';
 
 // Desktop routing supplies destinations; the v18 patrol and motion controller
 // retain ownership of observation, manual commands and the entire skid sequence.
@@ -58,6 +58,20 @@ export class DesktopBehavior {
     this.spider.motion.wake();
     const goal = this.navigator.points[0];
     if (goal) this.spider.goal.copy(this.unproject(goal));
+  }
+
+  avoid(pointer) {
+    if (!this.allowsPoint(pointer)) return false;
+    const position = this.project(this.spider.position);
+    const target = chooseFleeTarget(this.screens, position, pointer, this.spider.state.size, this.wholeScreen);
+    if (!target) return false;
+    const world = this.unproject(target);
+    if (!world || !this.manualCommand(world)) return false;
+    this.spider.patrol.beginTravel('long');
+    this.spider.motion.wake();
+    const next = this.navigator.points[0];
+    this.spider.goal.copy(next ? this.unproject(next) : world);
+    return true;
   }
 
   cancelManual() {

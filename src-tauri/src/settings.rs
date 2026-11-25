@@ -58,6 +58,7 @@ pub struct Settings {
     pub visible: bool,
     pub whole_screen: bool,
     pub allow_cross_screen: bool,
+    pub avoid_pointer: bool,
     pub auto_start: bool,
 }
 
@@ -77,6 +78,7 @@ impl Default for Settings {
             visible: true,
             whole_screen: false,
             allow_cross_screen: true,
+            avoid_pointer: true,
             auto_start: crate::autostart::is_enabled(),
         }
     }
@@ -96,6 +98,7 @@ pub enum Command {
     Visible(bool),
     WholeScreen(bool),
     AllowCrossScreen(bool),
+    AvoidPointer(bool),
     AutoStart(bool),
 }
 
@@ -119,6 +122,7 @@ impl Settings {
             Command::Visible(value) => self.visible = value,
             Command::WholeScreen(value) => self.whole_screen = value,
             Command::AllowCrossScreen(value) => self.allow_cross_screen = value,
+            Command::AvoidPointer(value) => self.avoid_pointer = value,
             Command::AutoStart(value) => self.auto_start = value,
         }
         Ok(())

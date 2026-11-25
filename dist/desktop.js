@@ -377,6 +377,10 @@ try {
   cleanup.push(await listen('pet-relocate', event => {
     behavior?.relocate(event.payload);
   }));
+  cleanup.push(await listen('pet-avoid', event => {
+    if (!settings?.visible || settings.paused || !settings.avoidPointer || settings.mode === 'follow' || !spider || !behavior) return;
+    if (behavior.avoid(event.payload) && settings.visible) clock.redraw();
+  }));
   cleanup.push(await listen('pet-destination', event => {
     if (!settings?.visible || settings.paused || !spider || !behavior) return;
     const {point, fast} = event.payload;

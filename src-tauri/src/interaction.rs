@@ -1,6 +1,23 @@
 use crate::desktop;
+use crate::settings::{Mode, Settings};
 
 const DRAG_THRESHOLD: f64 = 5.0;
+
+pub fn avoid_radius_logical(size: f64) -> f64 {
+    let size = if size.is_finite() && size > 0.0 {
+        size
+    } else {
+        0.5
+    };
+    (160.0 * size).clamp(95.0, 230.0)
+}
+
+pub fn should_avoid(settings: &Settings) -> bool {
+    settings.avoid_pointer
+        && settings.visible
+        && !settings.paused
+        && settings.mode != Mode::Follow
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ClickGesture {
@@ -160,16 +177,20 @@ mod platform {
         });
         Ok(())
     }
+
+    pub fn update_spider(_center: desktop::Point, _base_scale: f64) {}
+
+    pub fn sync_settings(_settings: &crate::settings::Settings, _base_scale: f64) {}
 }
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::{ClickGesture, DRAG_THRESHOLD};
-    use crate::{desktop, DesktopResult};
+    use super::{avoid_radius_logical, should_avoid, ClickGesture, DRAG_THRESHOLD};
+    use crate::{desktop, settings::Settings, DesktopResult};
     use serde::Serialize;
     use std::{
         sync::{
-            atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, Ordering},
+            atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicU64, Ordering},
             mpsc::{self, SyncSender, TrySendError},
             Mutex, OnceLock,
         },
@@ -193,6 +214,7 @@ mod platform {
 
     const EVENT_TTL: Duration = Duration::from_millis(500);
     const CHANNEL_CAPACITY: usize = 64;
+    const AVOID_COOLDOWN_MS: u64 = 180;
 
     #[derive(Clone, Serialize)]
     struct Destination {
@@ -213,6 +235,11 @@ mod platform {
             dragged: bool,
             at: Instant,
         },
+        Avoid {
+            x: i32,
+            y: i32,
+            at: Instant,
+        },
         Reset,
     }
 
@@ -224,12 +251,50 @@ mod platform {
 
     static HOOK_STATE: Mutex<Option<HookHandle>> = Mutex::new(None);
     static EVENT_TX: OnceLock<Mutex<Option<SyncSender<RawEvent>>>> = OnceLock::new();
+    static START_EPOCH: OnceLock<Instant> = OnceLock::new();
     static SELF_PID: AtomicU32 = AtomicU32::new(0);
     static PRESSING: AtomicBool = AtomicBool::new(false);
     static DRAGGED: AtomicBool = AtomicBool::new(false);
     static DOWN_X: AtomicI32 = AtomicI32::new(0);
     static DOWN_Y: AtomicI32 = AtomicI32::new(0);
     static DRAG_LIMIT_SQ: AtomicI64 = AtomicI64::new(25);
+    static AVOID_ENABLED: AtomicBool = AtomicBool::new(false);
+    static SPIDER_READY: AtomicBool = AtomicBool::new(false);
+    static SPIDER_PHYS_X: AtomicI32 = AtomicI32::new(0);
+    static SPIDER_PHYS_Y: AtomicI32 = AtomicI32::new(0);
+    static AVOID_RADIUS_SQ: AtomicI64 = AtomicI64::new(100 * 100);
+    static LAST_AVOID_MS: AtomicU64 = AtomicU64::new(0);
+
+    fn now_ms() -> u64 {
+        START_EPOCH
+            .get_or_init(Instant::now)
+            .elapsed()
+            .as_millis() as u64
+    }
+
+    pub fn update_spider(center: desktop::Point, base_scale: f64) {
+        let scale = if base_scale.is_finite() && base_scale > 0.0 {
+            base_scale
+        } else {
+            1.0
+        };
+        if center.x.is_finite() && center.y.is_finite() {
+            SPIDER_PHYS_X.store((center.x * scale).round() as i32, Ordering::Relaxed);
+            SPIDER_PHYS_Y.store((center.y * scale).round() as i32, Ordering::Relaxed);
+            SPIDER_READY.store(true, Ordering::Release);
+        }
+    }
+
+    pub fn sync_settings(settings: &Settings, base_scale: f64) {
+        let scale = if base_scale.is_finite() && base_scale > 0.0 {
+            base_scale
+        } else {
+            1.0
+        };
+        let radius_px = (avoid_radius_logical(settings.size) * scale).round() as i64;
+        AVOID_RADIUS_SQ.store(radius_px * radius_px, Ordering::Relaxed);
+        AVOID_ENABLED.store(should_avoid(settings), Ordering::Release);
+    }
 
     fn event_tx() -> &'static Mutex<Option<SyncSender<RawEvent>>> {
         EVENT_TX.get_or_init(|| Mutex::new(None))
@@ -293,12 +358,38 @@ mod platform {
                     }
                 }
                 WM_MOUSEMOVE => {
-                    // Never enqueue high-frequency mouse moves; only flag threshold overrun.
+                    // Never enqueue ordinary mouse moves; only check atomic drag overrun
+                    // and zero-allocation proximity gate for mouse avoidance.
                     if PRESSING.load(Ordering::Acquire) && !DRAGGED.load(Ordering::Relaxed) {
                         let dx = i64::from(info.pt.x - DOWN_X.load(Ordering::Relaxed));
                         let dy = i64::from(info.pt.y - DOWN_Y.load(Ordering::Relaxed));
                         if dx * dx + dy * dy > DRAG_LIMIT_SQ.load(Ordering::Relaxed) {
                             DRAGGED.store(true, Ordering::Release);
+                        }
+                    } else if AVOID_ENABLED.load(Ordering::Acquire)
+                        && SPIDER_READY.load(Ordering::Acquire)
+                    {
+                        let dx = i64::from(info.pt.x - SPIDER_PHYS_X.load(Ordering::Relaxed));
+                        let dy = i64::from(info.pt.y - SPIDER_PHYS_Y.load(Ordering::Relaxed));
+                        if dx * dx + dy * dy < AVOID_RADIUS_SQ.load(Ordering::Relaxed) {
+                            let now = now_ms();
+                            let prev = LAST_AVOID_MS.load(Ordering::Relaxed);
+                            if now.saturating_sub(prev) >= AVOID_COOLDOWN_MS
+                                && LAST_AVOID_MS
+                                    .compare_exchange(
+                                        prev,
+                                        now,
+                                        Ordering::AcqRel,
+                                        Ordering::Relaxed,
+                                    )
+                                    .is_ok()
+                            {
+                                enqueue(RawEvent::Avoid {
+                                    x: info.pt.x,
+                                    y: info.pt.y,
+                                    at: Instant::now(),
+                                });
+                            }
                         }
                     }
                 }
@@ -335,6 +426,14 @@ mod platform {
         update_drag_limit(layout.base_scale);
         match event {
             RawEvent::Reset => gesture.reset(),
+            RawEvent::Avoid { x, y, at } => {
+                if !should_avoid(&settings) || now.saturating_duration_since(at) > EVENT_TTL {
+                    return Ok(());
+                }
+                let point = desktop::physical_point_to_logical(x, y, layout.base_scale);
+                app.emit_to("pet", "pet-avoid", point)
+                    .map_err(|error| error.to_string())?;
+            }
             RawEvent::Down { x, y, at } => {
                 if now.saturating_duration_since(at) > EVENT_TTL {
                     gesture.reset();
@@ -393,8 +492,12 @@ mod platform {
             return Ok(());
         }
         SELF_PID.store(unsafe { GetCurrentProcessId() }, Ordering::Relaxed);
+        let _ = START_EPOCH.get_or_init(Instant::now);
         if let Ok(layout) = crate::cached_layout(app) {
             update_drag_limit(layout.base_scale);
+            if let Ok(current_settings) = crate::settings(app) {
+                sync_settings(&current_settings, layout.base_scale);
+            }
         }
         PRESSING.store(false, Ordering::Release);
         DRAGGED.store(false, Ordering::Release);
@@ -518,7 +621,7 @@ mod platform {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod platform {
-    use crate::DesktopResult;
+    use crate::{desktop, settings::Settings, DesktopResult};
 
     pub fn start(_app: &tauri::AppHandle) -> DesktopResult<()> {
         Err("Passive desktop clicks are currently supported on macOS and Windows only".into())
@@ -527,9 +630,13 @@ mod platform {
     pub fn stop() -> DesktopResult<()> {
         Ok(())
     }
+
+    pub fn update_spider(_center: desktop::Point, _base_scale: f64) {}
+
+    pub fn sync_settings(_settings: &Settings, _base_scale: f64) {}
 }
 
-pub use platform::{start, stop};
+pub use platform::{start, stop, sync_settings, update_spider};
 
 #[cfg(test)]
 mod tests {
@@ -572,5 +679,27 @@ mod tests {
         gesture.on_down(origin, true);
         gesture.reset();
         assert_eq!(gesture.on_up(origin, true, false), None);
+    }
+
+    #[test]
+    fn avoid_policy_disables_in_follow_paused_or_hidden_and_clamps_radius() {
+        let mut settings = Settings::default();
+        assert!(should_avoid(&settings));
+        settings.mode = Mode::Follow;
+        assert!(!should_avoid(&settings));
+        settings.mode = Mode::Observe;
+        assert!(should_avoid(&settings));
+        settings.paused = true;
+        assert!(!should_avoid(&settings));
+        settings.paused = false;
+        settings.visible = false;
+        assert!(!should_avoid(&settings));
+        settings.visible = true;
+        settings.avoid_pointer = false;
+        assert!(!should_avoid(&settings));
+
+        assert_eq!(avoid_radius_logical(0.35), 95.0);
+        assert_eq!(avoid_radius_logical(1.0), 160.0);
+        assert_eq!(avoid_radius_logical(2.1), 230.0);
     }
 }

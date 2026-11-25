@@ -86,6 +86,37 @@ export function routeBetween(screens, start, target) {
   return points;
 }
 
+// Pick an escape destination away from the pointer, deflecting smoothly out of screen corners.
+export function chooseFleeTarget(screens, position, pointer, size, wholeScreen = false) {
+  if (!screens.length) return null;
+  const margin = 110 * size;
+  const fleeDistance = Math.max(190, 260 * size);
+  let dx = position.x - pointer.x;
+  let dy = position.y - pointer.y;
+  const dist = Math.hypot(dx, dy);
+  const baseAngle = dist > 1 ? Math.atan2(dy, dx) : 0;
+  let best = null;
+  let bestScore = -Infinity;
+  for (const offset of [0, 0.55, -0.55, 1.15, -1.15, 1.75, -1.75, 2.35, -2.35]) {
+    const angle = baseAngle + offset;
+    const raw = {
+      x: position.x + Math.cos(angle) * fleeDistance,
+      y: position.y + Math.sin(angle) * fleeDistance,
+    };
+    const screen = screens[nearestScreen(screens, raw)];
+    const candidate = clampPoint(wholeScreen ? screen.frame : screen.workArea, raw, margin);
+    if (!routeBetween(screens, position, candidate)) continue;
+    const score = distance(candidate, pointer)
+      + Math.min(distance(candidate, position), fleeDistance) * 0.25
+      - Math.abs(offset) * 5;
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 export class DesktopNavigator {
   constructor(screens, wholeScreen = false, random = Math.random) {
     this.screens = screens;

@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {OrthographicCamera, Vector3} from '../dist/assets/three.module.js';
-import {DesktopNavigator, desktopBounds, routeBetween, contains} from '../dist/desktop-routing.js';
+import {DesktopNavigator, chooseFleeTarget, desktopBounds, routeBetween, contains, distance} from '../dist/desktop-routing.js';
 
 const screen = (x, y, width, height, scale = 1) => ({
   frame: {x, y, width, height}, workArea: {x, y: y + 28, width, height: height - 28}, scale,
@@ -79,4 +79,16 @@ test('cropping preserves global pixel positions and restores the simulation came
   assert(Math.abs(crop.y + (1 - clipped.y) * crop.height / 2 - y) < 1e-8);
   camera.clearViewOffset();
   assert.deepEqual(camera.projectionMatrix.toArray(), original);
+});
+
+test('chooseFleeTarget moves away from pointer and deflects out of screen corners', () => {
+  const screens = [screen(0, 0, 1440, 900)];
+  const open = chooseFleeTarget(screens, {x: 700, y: 450}, {x: 640, y: 450}, 0.5);
+  assert(open.x > 800 && Math.abs(open.y - 450) < 20);
+
+  // Near top-left corner with pointer approaching diagonally from inside the screen:
+  // direct retreat hits the corner, so the spider must deflect along a free edge.
+  const corner = chooseFleeTarget(screens, {x: 90, y: 110}, {x: 150, y: 170}, 0.5);
+  assert(contains(screens[0].workArea, corner));
+  assert(distance(corner, {x: 150, y: 170}) > 130);
 });
