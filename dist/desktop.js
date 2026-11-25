@@ -5,15 +5,17 @@ import {createContentBounds, chooseViewport} from './desktop-viewport.js';
 import {DesktopBehavior} from './desktop-behavior.js';
 import {desktopStrings, localizeDesktop} from './desktop-i18n.js';
 import {desktopBounds, nearestScreen, clampPoint, contains, distance} from './desktop-routing.js';
+import {SilkTrail} from './silk-trail.js';
 
 const frame = document.getElementById('original');
 const errorBox = document.getElementById('desktopError');
 const {invoke} = window.__TAURI__.core;
 const {listen} = window.__TAURI__.event;
-let settings, page, spider, screens, bounds, behavior, viewport, clock, measureContent;
+let settings, page, spider, screens, bounds, behavior, viewport, clock, measureContent, silkTrail;
+let shadowLight = null, shadowHalf = 0;
 let baseScale = 1;
 let stopped = false, placing = false, readingCursor = false, readingLayout = false;
-let resetCrop = true, styledViewport = null;
+let resetCrop = true, styledViewport = null, boundsFrame = 0, lastTrailAt = 0;
 let lastPlaced = null, topology = '';
 let cursorFailures = 0, cursorErrorShown = false;
 const cleanup = [];
@@ -60,6 +62,7 @@ function recoverPosition(point) {
   spider.velocity.set(0, 0, 0);
   spider.cancelManual();
   spider.legs.forEach(leg => { leg.initialized = false; leg.stepping = false; });
+  silkTrail?.reset();
 }
 
 function apply(next) {
@@ -71,6 +74,7 @@ function apply(next) {
   const reroute = settings && (settings.mode !== next.mode || settings.wholeScreen !== next.wholeScreen || crossingChanged);
   const suspended = settings && (settings.paused || !settings.visible);
   if (settings && settings.size !== next.size) resetCrop = true;
+  if (!next.visible) silkTrail?.reset();
   settings = next;
   if (reroute && spider) spider.cancelManual();
   if (crossingChanged && spider) {
@@ -158,14 +162,31 @@ function installBehavior() {
 }
 
 function track(point) {
-  const content = measureContent?.(bounds);
+  let measured = false;
   if (measureContent) {
-    viewport = chooseViewport(content, resetCrop ? null : viewport, point, settings.size);
+    // Re-measure full scene bounds periodically or after size/layout resets; in steady
+    // state the turning envelope already covers all poses, avoiding per-frame traversal.
+    if (resetCrop || !viewport || ++boundsFrame % 12 === 0) {
+      const content = measureContent(bounds);
+      viewport = chooseViewport(content, resetCrop ? null : viewport, point, settings.size);
+      measured = true;
+    } else {
+      viewport = {
+        x: Math.round(point.x - viewport.width / 2),
+        y: Math.round(point.y - viewport.height / 2),
+        width: viewport.width,
+        height: viewport.height,
+      };
+    }
   } else {
     const width = Math.min(1024, bounds.width), height = Math.min(1024, bounds.height);
     viewport = {x: Math.round(point.x - width / 2), y: Math.round(point.y - height / 2), width, height};
   }
   resetCrop = false;
+  return measured;
+}
+
+function syncViewportDomAndNative(point) {
   const x = viewport.x - bounds.x;
   const y = viewport.y - bounds.y;
   const dpr = frame.contentWindow?.devicePixelRatio || 1;
@@ -210,18 +231,72 @@ function track(point) {
   }).catch(report).finally(() => { placing = false; });
 }
 
+function updateAdaptivePacing() {
+  if (!clock || settings?.platform !== 'windows') return;
+  const speed = spider.velocity.length();
+  const stepping = spider.legs.some(leg => leg.stepping);
+  if (spider.sprinting || spider.motion.arriving || speed > 140 * settings.size) {
+    clock.setIntervalMs(1000 / 60);
+  } else if (speed > 1.5 || stepping) {
+    clock.setIntervalMs(1000 / 36);
+  } else {
+    clock.setIntervalMs(1000 / 20);
+  }
+}
+
+function updateTightShadow() {
+  if (!shadowLight) return;
+  const half = Math.max(150, Math.round(210 * settings.size));
+  shadowLight.target.position.set(spider.position.x, 0, spider.position.z);
+  shadowLight.position.set(spider.position.x - 200, 500, spider.position.z + 180);
+  shadowLight.target.updateMatrixWorld();
+  shadowLight.updateMatrixWorld();
+  if (half !== shadowHalf) {
+    shadowHalf = half;
+    shadowLight.shadow.camera.left = -half;
+    shadowLight.shadow.camera.right = half;
+    shadowLight.shadow.camera.top = half;
+    shadowLight.shadow.camera.bottom = -half;
+    shadowLight.shadow.camera.updateProjectionMatrix();
+  }
+}
+
 function attachRenderer() {
   const renderer = spider.renderer;
-  if (renderer.isWebGLRenderer) measureContent = createContentBounds(spider.scene, spider.camera);
+  if (renderer.isWebGLRenderer) {
+    // Downsize the 2048x2048 shadow map to 512x512 with a tight spider-tracking frustum:
+    // 16x fewer shadow texels and significantly lower GPU/VRAM cost with equal sharpness.
+    shadowLight = spider.scene.children.find(obj => obj.isDirectionalLight && obj.castShadow) ?? null;
+    if (shadowLight) {
+      if (!shadowLight.target.parent) spider.scene.add(shadowLight.target);
+      shadowLight.shadow.map?.dispose();
+      shadowLight.shadow.map = null;
+      shadowLight.shadow.mapSize.set(512, 512);
+      shadowLight.shadow.radius = 2;
+    }
+    silkTrail = new SilkTrail(spider.scene);
+    cleanup.push(() => { silkTrail?.dispose(); silkTrail = null; });
+    measureContent = createContentBounds(spider.scene, spider.camera);
+  }
   const originalRender = renderer.render.bind(renderer);
   renderer.render = (scene, camera) => {
     const point = globalPoint();
-    track(point);
+    const measured = track(point);
+    syncViewportDomAndNative(point);
+    updateAdaptivePacing();
     if (!renderer.isWebGLRenderer) return originalRender(scene, camera);
+    const now = performance.now();
+    const trailDt = lastTrailAt ? (now - lastTrailAt) / 1000 : 0;
+    lastTrailAt = now;
+    if (!settings.paused && silkTrail) {
+      silkTrail.update(trailDt, spider, Math.min(viewport.width, viewport.height) * 0.44);
+    }
+    updateTightShadow();
     // Crop only the render. Physics, camera projection and all original input handlers
     // keep using the full virtual desktop and the original simulation state.
     const dpr = frame.contentWindow.devicePixelRatio || 1;
-    const ratio = Math.min(dpr, 2);
+    const maxRatio = settings?.platform === 'windows' ? 1.5 : 2;
+    const ratio = Math.min(dpr, maxRatio);
     // On Windows mixed-DPI displays, native window size uses shared baseScale while
     // WebView2 CSS coordinates scale by the current monitor's DPR. Compensate so the
     // canvas fills the physical HWND without clipping or visual jumping across seams.
@@ -235,7 +310,7 @@ function attachRenderer() {
     }
     camera.setViewOffset(bounds.width, bounds.height,
       viewport.x - bounds.x, viewport.y - bounds.y, viewport.width, viewport.height);
-    // Measuring content already updated these same interpolated world matrices.
+    if (!measured) scene.updateMatrixWorld();
     const autoUpdate = scene.matrixWorldAutoUpdate;
     scene.matrixWorldAutoUpdate = false;
     try { return originalRender(scene, camera); }
@@ -253,7 +328,8 @@ async function waitForOriginal() {
   const child = frame.contentWindow;
   const document = child.document;
   document.open();
-  clock = createDesktopClock(child, frameId => invoke('request_animation_frame', {frameId}).catch(report));
+  clock = createDesktopClock(child, (frameId, intervalMs) =>
+    invoke('request_animation_frame', intervalMs != null ? {frameId, intervalMs} : {frameId}).catch(report));
   // Install the crop before the original's first display frame can allocate a
   // full virtual-desktop drawing surface.
   clock.setRunning(false);
@@ -291,7 +367,7 @@ function keydown(event) {
 }
 
 const cursorTimer = setInterval(() => readCursor(), 1000 / 30);
-const geometryTimer = setInterval(() => readLayout().catch(report), 2000);
+const geometryTimer = setInterval(() => readLayout().catch(report), 2500);
 window.addEventListener('pagehide', () => {
   stopped = true;
   clearInterval(cursorTimer);
@@ -326,7 +402,9 @@ try {
   apply(settings);
   attachRenderer();
   // Match the first crop and native position before revealing the window.
-  track(globalPoint());
+  const initialPoint = globalPoint();
+  track(initialPoint);
+  syncViewportDomAndNative(initialPoint);
   frame.contentWindow.addEventListener('keydown', keydown);
   frame.classList.add('ready');
   await invoke('pet_ready', {renderer: spider.renderer.isWebGLRenderer ? 'WebGL' : 'Canvas fallback'});

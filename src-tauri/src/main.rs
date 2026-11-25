@@ -20,11 +20,35 @@ use tauri::{
 #[derive(Default)]
 struct DesktopState(Mutex<Settings>);
 
-#[derive(Default)]
+const DEFAULT_FRAME_INTERVAL_US: u64 = 16_667;
+const MIN_FRAME_INTERVAL_US: u64 = 16_667;
+const MAX_FRAME_INTERVAL_US: u64 = 100_000;
+
 struct FrameClock {
     requested: AtomicU64,
+    interval_us: AtomicU64,
     stopping: AtomicBool,
     worker: OnceLock<std::thread::Thread>,
+}
+
+impl Default for FrameClock {
+    fn default() -> Self {
+        Self {
+            requested: AtomicU64::new(0),
+            interval_us: AtomicU64::new(DEFAULT_FRAME_INTERVAL_US),
+            stopping: AtomicBool::new(false),
+            worker: OnceLock::new(),
+        }
+    }
+}
+
+fn clamp_frame_interval_us(interval_ms: Option<f64>) -> u64 {
+    match interval_ms {
+        Some(ms) if ms.is_finite() && ms > 0.0 => {
+            ((ms * 1000.0).round() as u64).clamp(MIN_FRAME_INTERVAL_US, MAX_FRAME_INTERVAL_US)
+        }
+        _ => DEFAULT_FRAME_INTERVAL_US,
+    }
 }
 
 type DesktopResult<T> = Result<T, String>;
@@ -119,9 +143,13 @@ fn request_animation_frame(
     window: WebviewWindow,
     app: tauri::AppHandle,
     frame_id: u64,
+    interval_ms: Option<f64>,
 ) -> DesktopResult<()> {
     authorize_pet(&window)?;
     let clock = app.state::<FrameClock>();
+    clock
+        .interval_us
+        .store(clamp_frame_interval_us(interval_ms), Ordering::Relaxed);
     clock.requested.store(frame_id, Ordering::Relaxed);
     if let Some(worker) = clock.worker.get() {
         worker.unpark();
@@ -131,7 +159,6 @@ fn request_animation_frame(
 
 fn start_frame_clock(app: tauri::AppHandle) {
     std::thread::spawn(move || {
-        let interval = Duration::from_secs_f64(1.0 / 60.0);
         let clock = app.state::<FrameClock>();
         let _ = clock.worker.set(std::thread::current());
         let mut next = Instant::now();
@@ -145,6 +172,7 @@ fn start_frame_clock(app: tauri::AppHandle) {
                 break;
             }
             std::thread::sleep(next.saturating_duration_since(Instant::now()));
+            let interval = Duration::from_micros(clock.interval_us.load(Ordering::Relaxed));
             next = Instant::now() + interval;
             let frame_id = clock.requested.swap(0, Ordering::Relaxed);
             if frame_id != 0 {
@@ -425,7 +453,10 @@ fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::apply_pet_ex_style;
+    use super::{
+        apply_pet_ex_style, clamp_frame_interval_us, DEFAULT_FRAME_INTERVAL_US,
+        MAX_FRAME_INTERVAL_US, MIN_FRAME_INTERVAL_US,
+    };
 
     #[test]
     fn pet_ex_style_preserves_existing_bits_and_sets_overlay_flags() {
@@ -435,6 +466,16 @@ mod tests {
         const TOOL_WINDOW: isize = 0x0000_0080;
         let combined = apply_pet_ex_style(LAYERED | TRANSPARENT, NO_ACTIVATE, TOOL_WINDOW);
         assert_eq!(combined, LAYERED | TRANSPARENT | NO_ACTIVATE | TOOL_WINDOW);
+    }
+
+    #[test]
+    fn frame_interval_clamps_valid_and_invalid_values() {
+        assert_eq!(clamp_frame_interval_us(None), DEFAULT_FRAME_INTERVAL_US);
+        assert_eq!(clamp_frame_interval_us(Some(f64::NAN)), DEFAULT_FRAME_INTERVAL_US);
+        assert_eq!(clamp_frame_interval_us(Some(-5.0)), DEFAULT_FRAME_INTERVAL_US);
+        assert_eq!(clamp_frame_interval_us(Some(5.0)), MIN_FRAME_INTERVAL_US);
+        assert_eq!(clamp_frame_interval_us(Some(250.0)), MAX_FRAME_INTERVAL_US);
+        assert_eq!(clamp_frame_interval_us(Some(50.0)), 50_000);
     }
 }
 

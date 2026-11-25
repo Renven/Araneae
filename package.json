@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node server.mjs",
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check dist/app.js && node --check dist/organic.js && node --check dist/motion.js && node --check dist/gait.js && node --check dist/leg-safety.js && node --check dist/patrol.js && node --check dist/skid-effects.js && node --check dist/desktop.js && node --check dist/desktop-behavior.js && node --check dist/desktop-i18n.js && node --check dist/controls.js",
+    "check": "node --check server.mjs && node --check dist/app.js && node --check dist/organic.js && node --check dist/motion.js && node --check dist/gait.js && node --check dist/leg-safety.js && node --check dist/patrol.js && node --check dist/skid-effects.js && node --check dist/silk-trail.js && node --check dist/desktop.js && node --check dist/desktop-behavior.js && node --check dist/desktop-i18n.js && node --check dist/controls.js",
     "test:gait": "node scripts/check-gait.mjs",
     "test:burst": "node scripts/check-gait.mjs --route",
     "test:inertia": "node scripts/check-inertia.mjs",
@@ -20,6 +20,6 @@
     "desktop:build": "cargo tauri build --bundles app -- --locked",
     "desktop:build:win": "cargo tauri build -- --locked",
     "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml --locked",
-    "desktop:test": "node --test scripts/check-desktop-routing.mjs scripts/check-desktop-clock.mjs scripts/check-desktop-viewport.mjs scripts/check-desktop-i18n.mjs && node scripts/check-desktop-motion.mjs && cargo test --manifest-path src-tauri/Cargo.toml --locked"
+    "desktop:test": "node --test scripts/check-desktop-routing.mjs scripts/check-desktop-clock.mjs scripts/check-desktop-viewport.mjs scripts/check-desktop-i18n.mjs scripts/check-silk-trail.mjs && node scripts/check-desktop-motion.mjs && cargo test --manifest-path src-tauri/Cargo.toml --locked"
   }
 }

@@ -1,12 +1,13 @@
-// WKWebView may suspend browser frames in a non-activating overlay. Use one
+// WKWebView / WebView2 may suspend browser frames in a non-activating overlay. Use one
 // demand-driven native source instead of racing three schedulers every frame.
 export function createDesktopClock(child, requestNativeFrame) {
-  let serial = 0, ticket = null, running = true, disposed = false;
+  let serial = 0, ticket = null, running = true, disposed = false, intervalMs = null;
   const pending = new Map();
   function schedule(once = false) {
     if (disposed || ticket !== null || !pending.size || (!running && !once)) return;
     ticket = ++serial;
-    requestNativeFrame(ticket);
+    if (intervalMs !== null) requestNativeFrame(ticket, intervalMs);
+    else requestNativeFrame(ticket);
   }
   return {
     request(callback) {
@@ -27,6 +28,7 @@ export function createDesktopClock(child, requestNativeFrame) {
       }
       schedule();
     },
+    setIntervalMs(value) { intervalMs = Number.isFinite(value) && value > 0 ? value : null; },
     setRunning(value) { running = value; if (value) schedule(); },
     redraw() { schedule(true); },
     dispose() { disposed = true; ticket = null; pending.clear(); },
