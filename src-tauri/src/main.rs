@@ -103,7 +103,7 @@ fn pet_ready(window: WebviewWindow, app: tauri::AppHandle, renderer: String) -> 
 #[tauri::command]
 fn cursor_position(window: WebviewWindow, app: tauri::AppHandle) -> DesktopResult<desktop::Point> {
     authorize_pet(&window)?;
-    desktop::cursor(cached_layout(&app)?.primary_top)
+    desktop::cursor(&cached_layout(&app)?)
 }
 
 fn authorize_pet(window: &WebviewWindow) -> DesktopResult<()> {
@@ -202,7 +202,7 @@ fn place_viewport(
         return Err("Pet coordinates must be finite".into());
     }
     let layout = cached_layout(&app)?;
-    let actual = desktop::place(&window, bounds, layout.primary_top)?;
+    let actual = desktop::place(&window, bounds, &layout)?;
     let screen = layout
         .screens
         .iter()
@@ -276,7 +276,7 @@ fn move_to_cursor_screen(window: WebviewWindow, app: tauri::AppHandle) -> Deskto
 }
 
 fn relocate(app: &tauri::AppHandle) -> DesktopResult<()> {
-    let point = desktop::cursor(cached_layout(app)?.primary_top)?;
+    let point = desktop::cursor(&cached_layout(app)?)?;
     update(app, Command::Mode(Mode::Roam))?;
     app.emit_to("pet", "pet-relocate", point)
         .map_err(|e| e.to_string())
@@ -320,14 +320,17 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &item("quit", language.text("Quit Araneae", "退出 Araneae"))?,
         ],
     )?;
+    #[cfg(target_os = "windows")]
+    let tray_bytes: &[u8] = include_bytes!("../icons/tray-win.rgba");
+    #[cfg(not(target_os = "windows"))]
+    let tray_bytes: &[u8] = include_bytes!("../icons/tray.rgba");
+
+    let builder = TrayIconBuilder::with_id("spider")
+        .icon(tauri::image::Image::new(tray_bytes, 44, 44));
     // macOS recolors the template image to match the menu bar appearance.
-    TrayIconBuilder::with_id("spider")
-        .icon(tauri::image::Image::new(
-            include_bytes!("../icons/tray.rgba"),
-            44,
-            44,
-        ))
-        .icon_as_template(true)
+    #[cfg(target_os = "macos")]
+    let builder = builder.icon_as_template(true);
+    builder
         .tooltip(language.text("Araneae · Control Panel", "Araneae · 控制面板"))
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -365,6 +368,76 @@ fn configure_macos(window: &WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn apply_pet_ex_style(current: isize, no_activate: isize, tool_window: isize) -> isize {
+    current | no_activate | tool_window
+}
+
+#[cfg(target_os = "windows")]
+fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
+    use std::mem::size_of;
+    use windows_sys::Win32::{
+        Foundation::{HWND, S_OK},
+        Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWCP_DONOTROUND, DWMWA_WINDOW_CORNER_PREFERENCE,
+        },
+        UI::WindowsAndMessaging::{
+            GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
+            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        },
+    };
+    let hwnd = window.hwnd()?.0 as HWND;
+    let current = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+    let updated = apply_pet_ex_style(
+        current,
+        WS_EX_NOACTIVATE as isize,
+        WS_EX_TOOLWINDOW as isize,
+    );
+    if updated != current {
+        unsafe { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, updated) };
+    }
+    // Windows 11 Build 22000+ supports disabling rounded corners; gracefully ignore on Windows 10.
+    let corner_pref = DWMWCP_DONOTROUND;
+    let hr = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            (&corner_pref as *const i32).cast(),
+            size_of::<i32>() as u32,
+        )
+    };
+    if hr != S_OK {
+        eprintln!("DWMWA_WINDOW_CORNER_PREFERENCE unsupported or ignored (HRESULT={hr:#x})");
+    }
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_pet_ex_style;
+
+    #[test]
+    fn pet_ex_style_preserves_existing_bits_and_sets_overlay_flags() {
+        const LAYERED: isize = 0x0008_0000;
+        const TRANSPARENT: isize = 0x0000_0020;
+        const NO_ACTIVATE: isize = 0x0800_0000;
+        const TOOL_WINDOW: isize = 0x0000_0080;
+        let combined = apply_pet_ex_style(LAYERED | TRANSPARENT, NO_ACTIVATE, TOOL_WINDOW);
+        assert_eq!(combined, LAYERED | TRANSPARENT | NO_ACTIVATE | TOOL_WINDOW);
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(DesktopState::default())
@@ -395,6 +468,8 @@ fn main() {
             window.set_ignore_cursor_events(true)?;
             #[cfg(target_os = "macos")]
             configure_macos(&window)?;
+            #[cfg(target_os = "windows")]
+            configure_windows(&window)?;
             let layout = desktop::layout(&window)?;
             eprintln!("Desktop layout: {:?}", layout.screens);
             app.state::<ScreenState>()
