@@ -171,6 +171,8 @@ npm run desktop:test
 
 Simulation checks cover gait, momentum, anchored recovery, patrol, dashing, and desktop routing rules. They do not replace visual, fullscreen, or multi-display testing on a real Mac.
 
+The **Windows CI** workflow runs JavaScript syntax checks, Rust formatting, scoped desktop routing/clock/cropping tests, and native compilation and tests on `windows-latest`. The included `src-tauri/icons/icon.ico` is required by Tauri's Windows resource compiler. This workflow does not build installers or publish releases. The full desktop motion simulation is not included: it currently fails on the unchanged baseline at `manual-horizontal-slow: patrol took over a manual destination`; `npm run desktop:test` retains that check.
+
 Issues and improvements are welcome. Please include your macOS version, Mac chip, display arrangement and scaling, behavior mode, and reproduction steps. Keep the browser and desktop behavior boundaries intact, and avoid unrelated refactoring.
 
 ## License and Third-Party Code
