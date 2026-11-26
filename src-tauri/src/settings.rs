@@ -138,10 +138,7 @@ fn validate_color(value: Option<String>) -> Result<Option<String>, String> {
         return Ok(None);
     }
     let bytes = trimmed.as_bytes();
-    if bytes.len() == 7
-        && bytes[0] == b'#'
-        && bytes[1..].iter().all(|b| b.is_ascii_hexdigit())
-    {
+    if bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|b| b.is_ascii_hexdigit()) {
         Ok(Some(trimmed.to_ascii_lowercase()))
     } else {
         Err("Color must be a #RRGGBB hex string or null".into())
@@ -204,13 +201,17 @@ mod tests {
         assert_eq!(settings.color.as_deref(), Some("#c83e37"));
 
         for invalid in ["#fff", "red", "123456", "#12345g", "#1234567"] {
-            assert!(settings.apply(Command::Color(Some(invalid.into()))).is_err());
+            assert!(settings
+                .apply(Command::Color(Some(invalid.into())))
+                .is_err());
             assert_eq!(settings.color.as_deref(), Some("#c83e37"));
         }
 
         settings.apply(Command::Color(None)).unwrap();
         assert_eq!(settings.color, None);
-        settings.apply(Command::Color(Some("#2e8b57".into()))).unwrap();
+        settings
+            .apply(Command::Color(Some("#2e8b57".into())))
+            .unwrap();
         settings.apply(Command::Color(Some("".into()))).unwrap();
         assert_eq!(settings.color, None);
     }
@@ -234,7 +235,9 @@ mod tests {
             .unwrap();
         assert_eq!(settings.color.as_deref(), Some("#c83e37"));
         assert_eq!(settings.preset, None);
-        settings.apply(Command::Preset(Some("peacock".into()))).unwrap();
+        settings
+            .apply(Command::Preset(Some("peacock".into())))
+            .unwrap();
         assert_eq!(settings.preset.as_deref(), Some("peacock"));
         assert_eq!(settings.color, None);
         settings.apply(Command::Color(None)).unwrap();

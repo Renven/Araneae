@@ -1,4 +1,5 @@
 use crate::desktop;
+#[cfg(any(target_os = "windows", test))]
 use crate::settings::{Mode, Settings};
 
 const DRAG_THRESHOLD: f64 = 5.0;
@@ -14,6 +15,7 @@ pub fn drag_limit_sq_physical(base_scale: f64) -> i64 {
     (exact * exact).floor() as i64
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub fn avoid_radius_logical(size: f64) -> f64 {
     let size = if size.is_finite() && size > 0.0 {
         size
@@ -23,11 +25,9 @@ pub fn avoid_radius_logical(size: f64) -> f64 {
     (160.0 * size).clamp(95.0, 230.0)
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub fn should_avoid(settings: &Settings) -> bool {
-    settings.avoid_pointer
-        && settings.visible
-        && !settings.paused
-        && settings.mode != Mode::Follow
+    settings.avoid_pointer && settings.visible && !settings.paused && settings.mode != Mode::Follow
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -46,9 +46,10 @@ impl ClickGesture {
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn on_move(&mut self, point: desktop::Point) {
-        if self.press.is_some_and(|start| {
-            (point.x - start.x).hypot(point.y - start.y) > DRAG_THRESHOLD
-        }) {
+        if self
+            .press
+            .is_some_and(|start| (point.x - start.x).hypot(point.y - start.y) > DRAG_THRESHOLD)
+        {
             self.press = None;
         }
     }
@@ -125,7 +126,9 @@ mod platform {
             gesture.borrow_mut().reset();
             return Ok(());
         }
-        let command = event.modifierFlags().contains(NSEventModifierFlags::Command);
+        let command = event
+            .modifierFlags()
+            .contains(NSEventModifierFlags::Command);
         match event.r#type() {
             NSEventType::LeftMouseDown => gesture.borrow_mut().on_down(point, command),
             NSEventType::LeftMouseDragged => gesture.borrow_mut().on_move(point),
@@ -278,10 +281,7 @@ mod platform {
     static LAST_AVOID_MS: AtomicU64 = AtomicU64::new(0);
 
     fn now_ms() -> u64 {
-        START_EPOCH
-            .get_or_init(Instant::now)
-            .elapsed()
-            .as_millis() as u64
+        START_EPOCH.get_or_init(Instant::now).elapsed().as_millis() as u64
     }
 
     pub fn update_spider(center: desktop::Point, base_scale: f64) {
@@ -660,7 +660,9 @@ mod platform {
                 if posted || thread.is_finished() {
                     let _ = thread.join();
                 } else {
-                    eprintln!("Could not post WM_QUIT to mouse hook thread; skipping blocking join");
+                    eprintln!(
+                        "Could not post WM_QUIT to mouse hook thread; skipping blocking join"
+                    );
                 }
             }
             if let Some(worker) = handle.worker_thread.take() {

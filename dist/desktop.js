@@ -1,7 +1,7 @@
 import * as THREE from './assets/three.module.js';
 import {applySettings} from './desktop-adapter.js';
 import {createDesktopClock} from './desktop-clock.js';
-import {createContentBounds, chooseViewport} from './desktop-viewport.js';
+import {createContentBounds, chooseViewport, computeViewportPlacement} from './desktop-viewport.js';
 import {DesktopBehavior} from './desktop-behavior.js';
 import {desktopStrings, localizeDesktop} from './desktop-i18n.js';
 import {desktopBounds, nearestScreen, clampPoint, contains, distance} from './desktop-routing.js';
@@ -16,23 +16,26 @@ let baseScale = 1;
 let stopped = false, placing = false, readingCursor = false, readingLayout = false;
 let resetCrop = true, styledViewport = null, boundsFrame = 0;
 let lastPlaced = null, topology = '';
-let cursorFailures = 0, cursorErrorShown = false;
+let cursorFailures = 0, cursorErrorShown = false, activeErrorSource = null;
 const cleanup = [];
 let strings = desktopStrings();
 const raycaster = new THREE.Raycaster();
 const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-function report(error) {
+function report(error, source = 'general') {
   console.error('Desktop pet operation failed:', error);
+  if (source === 'cursor' && activeErrorSource && activeErrorSource !== 'cursor') return;
   errorBox.textContent = strings.petFailed + String(error);
   errorBox.hidden = false;
+  activeErrorSource = source;
 }
 
 function clearCursorError() {
-  if (cursorErrorShown) {
+  cursorErrorShown = false;
+  if (activeErrorSource === 'cursor') {
     errorBox.hidden = true;
     errorBox.textContent = '';
-    cursorErrorShown = false;
+    activeErrorSource = null;
   }
 }
 
@@ -142,7 +145,7 @@ async function readCursor() {
     cursorFailures++;
     console.warn('Cursor position poll failed:', error);
     if (cursorFailures >= 10 && !cursorErrorShown) {
-      report(error);
+      report(error, 'cursor');
       cursorErrorShown = true;
     }
   } finally {
@@ -184,26 +187,27 @@ function track(point) {
 }
 
 function syncViewportDomAndNative(point) {
-  const x = viewport.x - bounds.x;
-  const y = viewport.y - bounds.y;
   const dpr = frame.contentWindow?.devicePixelRatio || 1;
-  const cssScale = settings?.platform === 'windows' && dpr > 0 ? baseScale / dpr : 1;
-  const anchorZero = spider.renderer.isWebGLRenderer && Math.abs(cssScale - 1) > 1e-3;
-  const frameLeft = anchorZero ? 0 : -x;
-  const frameTop = anchorZero ? 0 : -y;
-  const canvasLeft = anchorZero ? 0 : x;
-  const canvasTop = anchorZero ? 0 : y;
-  if (!styledViewport || frameLeft !== styledViewport.frameLeft || frameTop !== styledViewport.frameTop
-    || canvasLeft !== styledViewport.canvasLeft || canvasTop !== styledViewport.canvasTop) {
-    frame.style.left = frameLeft + 'px';
-    frame.style.top = frameTop + 'px';
+  const placement = computeViewportPlacement(
+    viewport, bounds, baseScale, dpr,
+    settings?.platform === 'windows', spider.renderer.isWebGLRenderer,
+  );
+  if (!styledViewport || placement.frameLeft !== styledViewport.frameLeft
+    || placement.frameTop !== styledViewport.frameTop
+    || placement.frameScale !== styledViewport.frameScale
+    || placement.canvasLeft !== styledViewport.canvasLeft
+    || placement.canvasTop !== styledViewport.canvasTop) {
+    frame.style.left = placement.frameLeft + 'px';
+    frame.style.top = placement.frameTop + 'px';
+    frame.style.transformOrigin = '0 0';
+    frame.style.transform = placement.frameScale === 1 ? '' : `scale(${placement.frameScale})`;
     if (spider.renderer.isWebGLRenderer) {
       const canvas = spider.renderer.domElement;
       canvas.style.position = 'absolute';
-      canvas.style.left = canvasLeft + 'px';
-      canvas.style.top = canvasTop + 'px';
+      canvas.style.left = placement.canvasLeft + 'px';
+      canvas.style.top = placement.canvasTop + 'px';
     }
-    styledViewport = {frameLeft, frameTop, canvasLeft, canvasTop};
+    styledViewport = placement;
   }
   if (placing || (lastPlaced && distance(viewport, lastPlaced) < 1
     && viewport.width === lastPlaced.width && viewport.height === lastPlaced.height)) return;
@@ -279,19 +283,25 @@ function attachRenderer() {
     const measured = track(point);
     syncViewportDomAndNative(point);
     updateAdaptivePacing();
-    if (!renderer.isWebGLRenderer) return originalRender(scene, camera);
+    const dpr = frame.contentWindow.devicePixelRatio || 1;
+    if (!renderer.isWebGLRenderer) {
+      if (settings?.platform === 'windows') {
+        const targetRatio = Math.min(baseScale, 2);
+        if (renderer.pixelRatio !== targetRatio) renderer.setPixelRatio(targetRatio);
+      }
+      return originalRender(scene, camera);
+    }
     updateTightShadow();
     // Crop only the render. Physics, camera projection and all original input handlers
     // keep using the full virtual desktop and the original simulation state.
-    const dpr = frame.contentWindow.devicePixelRatio || 1;
     const maxRatio = settings?.platform === 'windows' ? 1.5 : 2;
     const ratio = Math.min(dpr, maxRatio);
     // On Windows mixed-DPI displays, native window size uses shared baseScale while
     // WebView2 CSS coordinates scale by the current monitor's DPR. Compensate so the
     // canvas fills the physical HWND without clipping or visual jumping across seams.
-    const cssScale = settings?.platform === 'windows' && dpr > 0 ? baseScale / dpr : 1;
-    const cssWidth = Math.max(1, Math.round(viewport.width * cssScale));
-    const cssHeight = Math.max(1, Math.round(viewport.height * cssScale));
+    const {cssWidth, cssHeight} = computeViewportPlacement(
+      viewport, bounds, baseScale, dpr, settings?.platform === 'windows', true,
+    );
     if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
     const canvas = renderer.domElement;
     if (canvas.width !== Math.floor(cssWidth * ratio) || canvas.height !== Math.floor(cssHeight * ratio)) {

@@ -116,9 +116,8 @@ mod platform {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let command = format_run_command(&exe.to_string_lossy());
             let wide = to_wide(&command);
-            let bytes = unsafe {
-                std::slice::from_raw_parts(wide.as_ptr().cast::<u8>(), wide.len() * 2)
-            };
+            let bytes =
+                unsafe { std::slice::from_raw_parts(wide.as_ptr().cast::<u8>(), wide.len() * 2) };
             let write = unsafe {
                 RegSetValueExW(
                     hkey,
@@ -188,10 +187,7 @@ mod tests {
     #[test]
     fn run_command_match_verifies_current_executable_path() {
         let current = r"C:\Program Files\Araneae\Araneae.exe";
-        assert!(matches_run_command(
-            &format_run_command(current),
-            current
-        ));
+        assert!(matches_run_command(&format_run_command(current), current));
         assert!(matches_run_command(
             r"c:\program files\araneae\araneae.exe",
             r"\\?\C:\Program Files\Araneae\Araneae.exe"

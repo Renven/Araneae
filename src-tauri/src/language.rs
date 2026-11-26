@@ -72,7 +72,10 @@ fn windows_preferred_language() -> Option<String> {
     if ok == 0 {
         return None;
     }
-    let end = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
+    let end = buffer
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(buffer.len());
     if end == 0 {
         return None;
     }
@@ -85,8 +88,20 @@ mod tests {
 
     #[test]
     fn parses_chinese_and_non_chinese_language_tags() {
-        for tag in ["zh", "zh-CN", "zh-Hans-CN", "zh-TW", "zh_CN", "ZH-hk", " zh-CN "] {
-            assert_eq!(Language::from_tag(tag), Language::SimplifiedChinese, "tag={tag}");
+        for tag in [
+            "zh",
+            "zh-CN",
+            "zh-Hans-CN",
+            "zh-TW",
+            "zh_CN",
+            "ZH-hk",
+            " zh-CN ",
+        ] {
+            assert_eq!(
+                Language::from_tag(tag),
+                Language::SimplifiedChinese,
+                "tag={tag}"
+            );
         }
         for tag in ["", "en", "en-US", "ja-JP", "zhx-CN"] {
             assert_eq!(Language::from_tag(tag), Language::English, "tag={tag}");
