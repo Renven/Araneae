@@ -100,8 +100,14 @@ async function readLayout() {
   try {
     const snapshot = await invoke('desktop_layout');
     baseScale = Number.isFinite(snapshot.baseScale) && snapshot.baseScale > 0 ? snapshot.baseScale : 1;
+    const dpr = frame.contentWindow?.devicePixelRatio || 1;
     const key = JSON.stringify({screens: snapshot.screens, baseScale});
-    if (key === topology) return;
+    if (key === topology) {
+      if (spider && settings?.visible && styledViewport && styledViewport.dpr !== dpr && clock) {
+        clock.redraw();
+      }
+      return;
+    }
     const previousPoint = spider ? globalPoint() : null;
     topology = key;
     // Mirrored displays share the same desktop coordinates and must not become duplicate destinations.
@@ -207,7 +213,9 @@ function syncViewportDomAndNative(point) {
       canvas.style.left = placement.canvasLeft + 'px';
       canvas.style.top = placement.canvasTop + 'px';
     }
-    styledViewport = placement;
+    styledViewport = {...placement, dpr};
+  } else if (styledViewport.dpr !== dpr) {
+    styledViewport.dpr = dpr;
   }
   if (placing || (lastPlaced && distance(viewport, lastPlaced) < 1
     && viewport.width === lastPlaced.width && viewport.height === lastPlaced.height)) return;
@@ -359,6 +367,29 @@ async function waitForOriginal() {
   if (!screens.some(screen => contains(screen.frame, point))) recoverPosition(point);
 }
 
+function watchDevicePixelRatio() {
+  const target = frame.contentWindow;
+  if (!target?.matchMedia) return;
+  let current = target.devicePixelRatio || 1;
+  let media = null;
+  const onChange = () => {
+    media?.removeEventListener('change', onChange);
+    const next = target.devicePixelRatio || 1;
+    if (next !== current) {
+      current = next;
+      if (spider && settings?.visible && clock) clock.redraw();
+    }
+    subscribe();
+  };
+  const subscribe = () => {
+    if (stopped) return;
+    media = target.matchMedia(`(resolution: ${current}dppx)`);
+    media.addEventListener('change', onChange, {once: true});
+  };
+  subscribe();
+  cleanup.push(() => media?.removeEventListener('change', onChange));
+}
+
 function keydown(event) {
   if (event.code === 'Space' && !['INPUT', 'BUTTON'].includes(page.activeElement.tagName)) {
     invoke('update_settings', {command: {type: 'paused', value: spider.state.paused}}).catch(report);
@@ -408,6 +439,7 @@ try {
   const initialPoint = globalPoint();
   track(initialPoint);
   syncViewportDomAndNative(initialPoint);
+  watchDevicePixelRatio();
   frame.contentWindow.addEventListener('keydown', keydown);
   frame.classList.add('ready');
   await invoke('pet_ready', {renderer: spider.renderer.isWebGLRenderer ? 'WebGL' : 'Canvas fallback'});

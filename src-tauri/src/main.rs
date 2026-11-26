@@ -316,19 +316,47 @@ fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
     window.set_focus().map_err(|e| e.to_string())
 }
 
+fn handle_tray_open_with<F, E>(
+    original: bool,
+    report_error: Option<String>,
+    mut open: F,
+    mut emit: E,
+) where
+    F: FnMut(bool) -> DesktopResult<()>,
+    E: FnMut(&str),
+{
+    let pending_error = match report_error {
+        Some(error) => Some(error),
+        None => match open(original) {
+            Ok(()) => None,
+            Err(error) => {
+                eprintln!("Desktop menu action failed: {error}");
+                Some(error)
+            }
+        },
+    };
+    if let Some(error) = pending_error {
+        if let Err(open_error) = open(false) {
+            eprintln!("Could not open desktop controls: {open_error}");
+        }
+        emit(&error);
+    }
+}
+
 fn spawn_open_window(app: tauri::AppHandle, original: bool, report_error: Option<String>) {
     // Tauri 2 warns that building a WebView2 window synchronously inside a tray event
     // callback or sync command can deadlock the Windows event loop; run it off-thread.
     std::thread::spawn(move || {
-        if let Err(open_error) = open_window(&app, original) {
-            eprintln!("Could not open desktop window: {open_error}");
-            return;
-        }
-        if let Some(error) = report_error {
-            if let Err(emit_error) = app.emit_to("controls", "desktop-error", &error) {
-                eprintln!("Could not report desktop error: {emit_error}");
-            }
-        }
+        handle_tray_open_with(
+            original,
+            report_error,
+            |open_original| open_window(&app, open_original),
+            |error| {
+                if let Err(emit_error) = app.emit_to("controls", "desktop-error", error) {
+                    eprintln!("Could not report desktop error: {emit_error}");
+                }
+            },
+        );
     });
 }
 
@@ -501,8 +529,8 @@ fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_pet_ex_style, clamp_frame_interval_us, DEFAULT_FRAME_INTERVAL_US,
-        MAX_FRAME_INTERVAL_US, MIN_FRAME_INTERVAL_US,
+        apply_pet_ex_style, clamp_frame_interval_us, handle_tray_open_with,
+        DEFAULT_FRAME_INTERVAL_US, MAX_FRAME_INTERVAL_US, MIN_FRAME_INTERVAL_US,
     };
 
     #[test]
@@ -529,6 +557,43 @@ mod tests {
         assert_eq!(clamp_frame_interval_us(Some(5.0)), MIN_FRAME_INTERVAL_US);
         assert_eq!(clamp_frame_interval_us(Some(250.0)), MAX_FRAME_INTERVAL_US);
         assert_eq!(clamp_frame_interval_us(Some(50.0)), 50_000);
+    }
+
+    #[test]
+    fn tray_open_retries_and_emits_error_when_open_or_fallback_fails() {
+        let mut attempts = 0usize;
+        let mut emitted = Vec::new();
+        handle_tray_open_with(
+            false,
+            None,
+            |original| {
+                assert!(!original);
+                attempts += 1;
+                if attempts == 1 {
+                    Err("post-show-error".into())
+                } else {
+                    Ok(())
+                }
+            },
+            |err| emitted.push(err.to_string()),
+        );
+        assert_eq!(attempts, 2);
+        assert_eq!(emitted, vec!["post-show-error"]);
+
+        let mut fallback_attempts = 0usize;
+        let mut fallback_emitted = Vec::new();
+        handle_tray_open_with(
+            false,
+            Some("action-failed".into()),
+            |original| {
+                assert!(!original);
+                fallback_attempts += 1;
+                Err("level-failed".into())
+            },
+            |err| fallback_emitted.push(err.to_string()),
+        );
+        assert_eq!(fallback_attempts, 1);
+        assert_eq!(fallback_emitted, vec!["action-failed"]);
     }
 }
 
