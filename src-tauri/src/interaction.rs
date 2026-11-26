@@ -1,5 +1,4 @@
 use crate::desktop;
-use crate::settings::Settings;
 
 const DRAG_THRESHOLD: f64 = 5.0;
 
@@ -30,9 +29,10 @@ impl ClickGesture {
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn on_move(&mut self, point: desktop::Point) {
-        if self.press.is_some_and(|start| {
-            (point.x - start.x).hypot(point.y - start.y) > DRAG_THRESHOLD
-        }) {
+        if self
+            .press
+            .is_some_and(|start| (point.x - start.x).hypot(point.y - start.y) > DRAG_THRESHOLD)
+        {
             self.press = None;
         }
     }
@@ -109,7 +109,9 @@ mod platform {
             gesture.borrow_mut().reset();
             return Ok(());
         }
-        let command = event.modifierFlags().contains(NSEventModifierFlags::Command);
+        let command = event
+            .modifierFlags()
+            .contains(NSEventModifierFlags::Command);
         match event.r#type() {
             NSEventType::LeftMouseDown => gesture.borrow_mut().on_down(point, command),
             NSEventType::LeftMouseDragged => gesture.borrow_mut().on_move(point),
@@ -563,7 +565,9 @@ mod platform {
                 if posted || thread.is_finished() {
                     let _ = thread.join();
                 } else {
-                    eprintln!("Could not post WM_QUIT to mouse hook thread; skipping blocking join");
+                    eprintln!(
+                        "Could not post WM_QUIT to mouse hook thread; skipping blocking join"
+                    );
                 }
             }
             if let Some(worker) = handle.worker_thread.take() {
@@ -655,6 +659,8 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn sync_settings_clears_active_press_on_pause_or_hide() {
+        use crate::settings::Settings;
+
         platform::test_set_pressing(true, false);
         let mut settings = Settings::default();
         settings.paused = true;

@@ -238,7 +238,10 @@ fn place_viewport(
     Ok(actual)
 }
 
+static OPEN_WINDOW_LOCK: Mutex<()> = Mutex::new(());
+
 fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
+    let _guard = OPEN_WINDOW_LOCK.lock().map_err(|e| e.to_string())?;
     let language = settings(app)?.language;
     let (label, title, url, width, height) = if original {
         (
@@ -280,10 +283,28 @@ fn open_window(app: &tauri::AppHandle, original: bool) -> DesktopResult<()> {
     window.set_focus().map_err(|e| e.to_string())
 }
 
+fn spawn_open_window(app: tauri::AppHandle, original: bool, report_error: Option<String>) {
+    // Tauri 2 warns that building a WebView2 window synchronously inside a tray event
+    // callback or sync command can deadlock the Windows event loop; run it off-thread.
+    std::thread::spawn(move || {
+        if let Err(open_error) = open_window(&app, original) {
+            eprintln!("Could not open desktop window: {open_error}");
+            return;
+        }
+        if let Some(error) = report_error {
+            if let Err(emit_error) = app.emit_to("controls", "desktop-error", &error) {
+                eprintln!("Could not report desktop error: {emit_error}");
+            }
+        }
+    });
+}
+
 #[tauri::command]
-fn open_original(window: WebviewWindow, app: tauri::AppHandle) -> DesktopResult<()> {
+async fn open_original(window: WebviewWindow, app: tauri::AppHandle) -> DesktopResult<()> {
     authorize(&window)?;
-    open_window(&app, true)
+    tauri::async_runtime::spawn_blocking(move || open_window(&app, true))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -301,7 +322,7 @@ fn relocate(app: &tauri::AppHandle) -> DesktopResult<()> {
 
 fn menu_action(app: &tauri::AppHandle, id: &str) -> DesktopResult<()> {
     match id {
-        "controls" => open_window(app, false)?,
+        "controls" => spawn_open_window(app.clone(), false, None),
         "roam" => {
             update(app, Command::Mode(Mode::Roam))?;
         }
@@ -342,8 +363,8 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     #[cfg(not(target_os = "windows"))]
     let tray_bytes: &[u8] = include_bytes!("../icons/tray.rgba");
 
-    let builder = TrayIconBuilder::with_id("spider")
-        .icon(tauri::image::Image::new(tray_bytes, 44, 44));
+    let builder =
+        TrayIconBuilder::with_id("spider").icon(tauri::image::Image::new(tray_bytes, 44, 44));
     // macOS recolors the template image to match the menu bar appearance.
     #[cfg(target_os = "macos")]
     let builder = builder.icon_as_template(true);
@@ -354,12 +375,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| {
             if let Err(error) = menu_action(app, event.id.as_ref()) {
                 eprintln!("Desktop menu action failed: {error}");
-                if let Err(open_error) = open_window(app, false) {
-                    eprintln!("Could not open desktop controls: {open_error}");
-                }
-                if let Err(emit_error) = app.emit_to("controls", "desktop-error", &error) {
-                    eprintln!("Could not report desktop error: {emit_error}");
-                }
+                spawn_open_window(app.clone(), false, Some(error));
             }
         })
         .build(app)?;
@@ -429,9 +445,7 @@ fn configure_windows(window: &WebviewWindow) -> tauri::Result<()> {
     use std::mem::size_of;
     use windows_sys::Win32::{
         Foundation::{HWND, S_OK},
-        Graphics::Dwm::{
-            DwmSetWindowAttribute, DWMWCP_DONOTROUND, DWMWA_WINDOW_CORNER_PREFERENCE,
-        },
+        Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND},
     };
     ensure_windows_overlay_style(window)?;
     let hwnd = window.hwnd()?.0 as HWND;

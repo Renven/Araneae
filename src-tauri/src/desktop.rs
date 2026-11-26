@@ -57,16 +57,26 @@ pub struct Layout {
     pub primary_top: f64,
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub fn physical_point_to_logical(x: i32, y: i32, scale: f64) -> Point {
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
     Point {
         x: f64::from(x) / scale,
         y: f64::from(y) / scale,
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub fn physical_rect_to_logical(left: i32, top: i32, right: i32, bottom: i32, scale: f64) -> Rect {
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
     Rect {
         x: f64::from(left) / scale,
         y: f64::from(top) / scale,
@@ -75,8 +85,13 @@ pub fn physical_rect_to_logical(left: i32, top: i32, right: i32, bottom: i32, sc
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 pub fn logical_rect_to_physical(bounds: Rect, scale: f64) -> (i32, i32, i32, i32) {
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
     let left = (bounds.x * scale).round() as i32;
     let top = (bounds.y * scale).round() as i32;
     let right = ((bounds.x + bounds.width) * scale).round() as i32;
@@ -159,12 +174,28 @@ mod platform {
         Ok(top_left(native.frame(), layout.primary_top))
     }
 
-    pub fn set_level(window: &WebviewWindow, offset: Option<isize>) -> Result<(), String> {
+    fn apply_level(window: &WebviewWindow, offset: Option<isize>) -> Result<(), String> {
         use objc2_app_kit::{NSNormalWindowLevel, NSStatusWindowLevel};
         let pointer = window.ns_window().map_err(|e| e.to_string())?;
         let native = unsafe { &*pointer.cast::<NSWindow>() };
         native.setLevel(offset.map_or(NSNormalWindowLevel, |offset| NSStatusWindowLevel + offset));
         Ok(())
+    }
+
+    pub fn set_level(window: &WebviewWindow, offset: Option<isize>) -> Result<(), String> {
+        if MainThreadMarker::new().is_some() {
+            apply_level(window, offset)
+        } else {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let target = window.clone();
+            window
+                .run_on_main_thread(move || {
+                    let _ = tx.send(apply_level(&target, offset));
+                })
+                .map_err(|e| e.to_string())?;
+            rx.recv()
+                .map_err(|_| "Main thread stopped before updating window level".to_string())?
+        }
     }
 }
 
@@ -335,7 +366,11 @@ mod platform {
         if unsafe { GetCursorPos(&mut point) } == 0 {
             return Err("Global cursor position is temporarily unavailable".into());
         }
-        Ok(physical_point_to_logical(point.x, point.y, layout.base_scale))
+        Ok(physical_point_to_logical(
+            point.x,
+            point.y,
+            layout.base_scale,
+        ))
     }
 
     pub fn place(window: &WebviewWindow, bounds: Rect, layout: &Layout) -> Result<Rect, String> {
@@ -403,15 +438,24 @@ mod platform {
     use super::*;
 
     pub fn layout(_window: &WebviewWindow) -> Result<Layout, String> {
-        Err("Automatic cross-screen geometry is currently supported on macOS and Windows only".into())
+        Err(
+            "Automatic cross-screen geometry is currently supported on macOS and Windows only"
+                .into(),
+        )
     }
 
     pub fn cursor(_layout: &Layout) -> Result<Point, String> {
-        Err("Global logical cursor coordinates are currently supported on macOS and Windows only".into())
+        Err(
+            "Global logical cursor coordinates are currently supported on macOS and Windows only"
+                .into(),
+        )
     }
 
     pub fn place(_window: &WebviewWindow, _bounds: Rect, _layout: &Layout) -> Result<Rect, String> {
-        Err("Automatic cross-screen positioning is currently supported on macOS and Windows only".into())
+        Err(
+            "Automatic cross-screen positioning is currently supported on macOS and Windows only"
+                .into(),
+        )
     }
 
     pub fn set_level(window: &WebviewWindow, offset: Option<isize>) -> Result<(), String> {
