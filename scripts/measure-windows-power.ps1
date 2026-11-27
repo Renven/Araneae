@@ -8,17 +8,26 @@ param(
     [int]$Seconds = 30,
 
     [ValidateRange(0, 3600)]
-    [int]$DelaySeconds = 0
+    [int]$DelaySeconds = 0,
+
+    [string]$UserDataDirectory
 )
 
 $ErrorActionPreference = 'Stop'
+$profilePattern = if ($UserDataDirectory) {
+    [Regex]::Escape([IO.Path]::GetFullPath($UserDataDirectory).TrimEnd('\'))
+} else {
+    'com\.shadowspider\.desktop'
+}
 
 function Find-AraneaeProcessIds([int]$RootId, [int]$SessionId) {
     $webviews = @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe' AND SessionId = $SessionId")
     $ids = [Collections.Generic.HashSet[int]]::new()
     [void]$ids.Add($RootId)
     foreach ($view in $webviews) {
-        if ($view.CommandLine -match '--user-data-dir=(?:"[^"]*com\.shadowspider\.desktop[^"]*"|\S*com\.shadowspider\.desktop\S*)') {
+        if ($view.CommandLine -match '--user-data-dir=(?:"([^"]+)"|(\S+))') {
+            $profile = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+            if ($profile -notmatch $profilePattern) { continue }
             [void]$ids.Add([int]$view.ProcessId)
         }
     }
@@ -45,6 +54,7 @@ if ($DelaySeconds -gt 0) {
 $started = Get-Date
 $watch = [Diagnostics.Stopwatch]::StartNew()
 $previousCpu = @{}
+$cpuByProcess = @{}
 $observedIds = [Collections.Generic.HashSet[int]]::new()
 $cpuSeconds = 0.0
 $gpuPeak = 0.0
@@ -65,12 +75,15 @@ while ($true) {
             }
             $key = "$id/$($birth.Ticks)"
             [void]$observedIds.Add($id)
+            $delta = 0.0
             if ($previousCpu.ContainsKey($key)) {
-                $cpuSeconds += [Math]::Max(0.0, $cpu - $previousCpu[$key])
+                $delta = [Math]::Max(0.0, $cpu - $previousCpu[$key])
             } elseif ($birth -ge $started) {
-                $cpuSeconds += $cpu
+                $delta = $cpu
             }
             $previousCpu[$key] = $cpu
+            $cpuByProcess[$id] += $delta
+            $cpuSeconds += $delta
         } catch {
             if ($id -eq $ProcessId) { throw }
             # A subprocess can exit between the process and CPU queries.
@@ -107,6 +120,9 @@ while ($true) {
     ElapsedSeconds = [Math]::Round($cpuSampleAt - $firstCpuSampleAt, 3)
     ProcessIds = @($observedIds | Sort-Object)
     CpuSeconds = [Math]::Round($cpuSeconds, 6)
+    CpuByProcess = @($cpuByProcess.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        [PSCustomObject]@{ ProcessId = $_.Key; CpuSeconds = [Math]::Round($_.Value, 6) }
+    })
     GpuPeakPercent = $(if ($gpuSamples -gt 0) { $gpuPeak })
     GpuSamples = $gpuSamples
     GpuEngineMatches = $gpuMatches
