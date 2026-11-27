@@ -171,6 +171,8 @@ npm run desktop:test
 
 模拟检查覆盖步态、惯性、锚定回正、巡逻、冲刺及桌面导航等规则，不能替代实际 Mac 上的视觉、全屏及多屏测试。
 
+**Windows CI** 工作流在 `windows-latest` 上执行 JavaScript 语法、Rust 格式、桌面专项测试（导航／时钟／电源挂起／裁剪／多语言／配色预设），以及原生编译检查和测试。附带的 `src-tauri/icons/icon.ico` 是 Tauri 在 Windows 编译资源所必需的图标。该工作流不构建安装包，也不发布 Release。完整桌面运动模拟暂未纳入：未修改的基线代码会在 `manual-horizontal-slow: patrol took over a manual destination` 处失败；`npm run desktop:test` 仍保留该检查。
+
 欢迎提交问题与改进。反馈请附 macOS 版本、Mac 芯片、显示器排列与缩放、行为模式及复现步骤；修改时尽量保持网页版与桌宠入口的行为边界，并避免无关重构。
 
 ## 许可证与第三方代码
