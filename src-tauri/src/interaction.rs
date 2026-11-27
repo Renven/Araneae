@@ -235,9 +235,22 @@ mod platform {
     struct Destination {
         point: desktop::Point,
         fast: bool,
+        epoch: u64,
     }
 
-    enum RawEvent {
+    struct RawEvent {
+        epoch: u64,
+        kind: MouseInput,
+    }
+
+    #[derive(Clone, Serialize)]
+    struct Avoid {
+        #[serde(flatten)]
+        point: desktop::Point,
+        epoch: u64,
+    }
+
+    enum MouseInput {
         Down {
             x: i32,
             y: i32,
@@ -268,6 +281,9 @@ mod platform {
     static EVENT_TX: OnceLock<Mutex<Option<SyncSender<RawEvent>>>> = OnceLock::new();
     static START_EPOCH: OnceLock<Instant> = OnceLock::new();
     static SELF_PID: AtomicU32 = AtomicU32::new(0);
+    // Power epochs start awake and advance once per edge. An odd epoch is suspended.
+    static POWER_EPOCH: AtomicU64 = AtomicU64::new(0);
+    static PRESS_EPOCH: AtomicU64 = AtomicU64::new(0);
     static PRESSING: AtomicBool = AtomicBool::new(false);
     static DRAGGED: AtomicBool = AtomicBool::new(false);
     static DOWN_X: AtomicI32 = AtomicI32::new(0);
@@ -312,12 +328,22 @@ mod platform {
         }
     }
 
+    pub fn set_system_suspended(suspended: bool, epoch: u64) {
+        debug_assert_eq!(suspended, epoch & 1 != 0);
+        if POWER_EPOCH.fetch_max(epoch, Ordering::AcqRel) < epoch && suspended {
+            cancel_active_press();
+        }
+    }
+
     fn cancel_active_press() {
         PRESSING.store(false, Ordering::Release);
         DRAGGED.store(false, Ordering::Release);
         if let Ok(guard) = event_tx().lock() {
             if let Some(tx) = guard.as_ref() {
-                let _ = tx.try_send(RawEvent::Reset);
+                let _ = tx.try_send(RawEvent {
+                    epoch: POWER_EPOCH.load(Ordering::Acquire),
+                    kind: MouseInput::Reset,
+                });
             }
         }
     }
@@ -376,19 +402,30 @@ mod platform {
         DRAGGED.store(dragged, Ordering::Release);
     }
 
-    fn enqueue(event: RawEvent) {
+    fn enqueue(epoch: u64, kind: MouseInput) {
+        if POWER_EPOCH.load(Ordering::Acquire) != epoch {
+            return;
+        }
+        let event = RawEvent { epoch, kind };
         if let Ok(guard) = event_tx().try_lock() {
             if let Some(tx) = guard.as_ref() {
                 if let Err(TrySendError::Full(_)) = tx.try_send(event) {
                     PRESSING.store(false, Ordering::Release);
                     DRAGGED.store(false, Ordering::Release);
-                    let _ = tx.try_send(RawEvent::Reset);
+                    let _ = tx.try_send(RawEvent {
+                        epoch,
+                        kind: MouseInput::Reset,
+                    });
                 }
             }
         }
     }
 
     unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        let epoch = POWER_EPOCH.load(Ordering::Acquire);
+        if epoch & 1 != 0 {
+            return CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam);
+        }
         if code >= 0 && lparam != 0 {
             let info = &*(lparam as *const MSLLHOOKSTRUCT);
             match wparam as u32 {
@@ -397,22 +434,29 @@ mod platform {
                         DOWN_X.store(info.pt.x, Ordering::Relaxed);
                         DOWN_Y.store(info.pt.y, Ordering::Relaxed);
                         DRAGGED.store(false, Ordering::Release);
+                        PRESS_EPOCH.store(epoch, Ordering::Relaxed);
                         PRESSING.store(true, Ordering::Release);
-                        enqueue(RawEvent::Down {
-                            x: info.pt.x,
-                            y: info.pt.y,
-                            at: Instant::now(),
-                        });
+                        enqueue(
+                            epoch,
+                            MouseInput::Down {
+                                x: info.pt.x,
+                                y: info.pt.y,
+                                at: Instant::now(),
+                            },
+                        );
                     } else {
                         PRESSING.store(false, Ordering::Release);
                         DRAGGED.store(false, Ordering::Release);
-                        enqueue(RawEvent::Reset);
+                        enqueue(epoch, MouseInput::Reset);
                     }
                 }
                 WM_MOUSEMOVE => {
                     // Never enqueue ordinary mouse moves; only check atomic drag overrun
                     // and zero-allocation proximity gate for mouse avoidance.
-                    if PRESSING.load(Ordering::Acquire) && !DRAGGED.load(Ordering::Relaxed) {
+                    if PRESSING.load(Ordering::Acquire)
+                        && PRESS_EPOCH.load(Ordering::Relaxed) == epoch
+                        && !DRAGGED.load(Ordering::Relaxed)
+                    {
                         let dx = i64::from(info.pt.x - DOWN_X.load(Ordering::Relaxed));
                         let dy = i64::from(info.pt.y - DOWN_Y.load(Ordering::Relaxed));
                         if dx * dx + dy * dy > DRAG_LIMIT_SQ.load(Ordering::Relaxed) {
@@ -436,26 +480,30 @@ mod platform {
                                     )
                                     .is_ok()
                             {
-                                enqueue(RawEvent::Avoid {
-                                    x: info.pt.x,
-                                    y: info.pt.y,
-                                    at: Instant::now(),
-                                });
+                                enqueue(
+                                    epoch,
+                                    MouseInput::Avoid {
+                                        x: info.pt.x,
+                                        y: info.pt.y,
+                                        at: Instant::now(),
+                                    },
+                                );
                             }
                         }
                     }
                 }
-                WM_LBUTTONUP => {
-                    if PRESSING.swap(false, Ordering::AcqRel) {
-                        let dragged = DRAGGED.swap(false, Ordering::AcqRel);
-                        enqueue(RawEvent::Up {
+                WM_LBUTTONUP if take_press(epoch) => {
+                    let dragged = DRAGGED.swap(false, Ordering::AcqRel);
+                    enqueue(
+                        epoch,
+                        MouseInput::Up {
                             x: info.pt.x,
                             y: info.pt.y,
                             ctrl_held: ctrl_pressed(),
                             dragged,
                             at: Instant::now(),
-                        });
-                    }
+                        },
+                    );
                 }
                 _ => {}
             }
@@ -463,11 +511,42 @@ mod platform {
         CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
     }
 
+    fn take_press(epoch: u64) -> bool {
+        PRESS_EPOCH.load(Ordering::Relaxed) == epoch && PRESSING.swap(false, Ordering::AcqRel)
+    }
+
+    fn input_matches_epoch(
+        event_epoch: u64,
+        current_epoch: u64,
+        gesture_epoch: &mut u64,
+        gesture: &mut ClickGesture,
+    ) -> bool {
+        if *gesture_epoch != current_epoch {
+            gesture.reset();
+            *gesture_epoch = current_epoch;
+        }
+        current_epoch & 1 == 0 && event_epoch == current_epoch
+    }
+
     fn process_event(
         app: &tauri::AppHandle,
         event: RawEvent,
         gesture: &mut ClickGesture,
+        gesture_epoch: &mut u64,
     ) -> DesktopResult<()> {
+        let RawEvent { epoch, kind } = event;
+        if !input_matches_epoch(
+            epoch,
+            POWER_EPOCH.load(Ordering::Acquire),
+            gesture_epoch,
+            gesture,
+        ) {
+            return Ok(());
+        }
+        if matches!(kind, MouseInput::Reset) {
+            gesture.reset();
+            return Ok(());
+        }
         let now = Instant::now();
         let settings = crate::settings(app)?;
         if !settings.visible || settings.paused {
@@ -476,17 +555,20 @@ mod platform {
         }
         let layout = crate::cached_layout(app)?;
         update_drag_limit(layout.base_scale);
-        match event {
-            RawEvent::Reset => gesture.reset(),
-            RawEvent::Avoid { x, y, at } => {
+        match kind {
+            MouseInput::Reset => unreachable!("Reset was already handled"),
+            MouseInput::Avoid { x, y, at } => {
                 if !should_avoid(&settings) || now.saturating_duration_since(at) > EVENT_TTL {
                     return Ok(());
                 }
                 let point = desktop::physical_point_to_logical(x, y, layout.base_scale);
-                app.emit_to("pet", "pet-avoid", point)
+                if POWER_EPOCH.load(Ordering::Acquire) != epoch {
+                    return Ok(());
+                }
+                app.emit_to("pet", "pet-avoid", Avoid { point, epoch })
                     .map_err(|error| error.to_string())?;
             }
-            RawEvent::Down { x, y, at } => {
+            MouseInput::Down { x, y, at } => {
                 if now.saturating_duration_since(at) > EVENT_TTL {
                     gesture.reset();
                     return Ok(());
@@ -502,7 +584,7 @@ mod platform {
                     gesture.reset();
                 }
             }
-            RawEvent::Up {
+            MouseInput::Up {
                 x,
                 y,
                 ctrl_held,
@@ -523,12 +605,16 @@ mod platform {
                     return Ok(());
                 }
                 if let Some(target) = gesture.on_up(point, ctrl_held, dragged) {
+                    if POWER_EPOCH.load(Ordering::Acquire) != epoch {
+                        return Ok(());
+                    }
                     app.emit_to(
                         "pet",
                         "pet-destination",
                         Destination {
                             point: target,
                             fast: true,
+                            epoch,
                         },
                     )
                     .map_err(|error| error.to_string())?;
@@ -562,8 +648,11 @@ mod platform {
             .name("araneae-click-worker".into())
             .spawn(move || {
                 let mut gesture = ClickGesture::default();
+                let mut gesture_epoch = POWER_EPOCH.load(Ordering::Acquire);
                 while let Ok(event) = rx.recv() {
-                    if let Err(error) = process_event(&worker_app, event, &mut gesture) {
+                    if let Err(error) =
+                        process_event(&worker_app, event, &mut gesture, &mut gesture_epoch)
+                    {
                         eprintln!("Desktop click handling failed: {error}");
                         if let Err(report_error) =
                             worker_app.emit_to("controls", "desktop-error", &error)
@@ -671,6 +760,34 @@ mod platform {
         }
         Ok(())
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn interaction_rejects_held_press_from_before_sleep() {
+            // The old press cannot complete, even if an in-flight hook set the flag
+            // after the suspension edge had already cleared it.
+            PRESS_EPOCH.store(0, Ordering::Relaxed);
+            assert!(!take_press(2));
+        }
+
+        #[test]
+        fn interaction_drops_old_queue_and_resets_worker_gesture_once() {
+            let point = desktop::Point { x: 5.0, y: 5.0 };
+            let mut gesture = ClickGesture::default();
+            gesture.on_down(point, true);
+            let mut gesture_epoch = 0;
+            assert!(!input_matches_epoch(0, 1, &mut gesture_epoch, &mut gesture));
+            assert!(!input_matches_epoch(1, 1, &mut gesture_epoch, &mut gesture));
+            assert!(gesture.on_up(point, true, false).is_none());
+            assert!(input_matches_epoch(2, 2, &mut gesture_epoch, &mut gesture));
+            gesture.on_down(point, true);
+            assert!(!input_matches_epoch(0, 2, &mut gesture_epoch, &mut gesture));
+            assert_eq!(gesture.on_up(point, true, false), Some(point));
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -691,6 +808,12 @@ mod platform {
 }
 
 pub use platform::{start, stop, sync_settings, update_spider};
+
+#[cfg(windows)]
+pub use platform::set_system_suspended;
+
+#[cfg(not(windows))]
+pub fn set_system_suspended(_: bool, _: u64) {}
 
 #[cfg(test)]
 mod tests {

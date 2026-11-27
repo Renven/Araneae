@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "desktop-controls",
-  "description": "Allow the pet and its controls to receive native settings events.",
-  "windows": ["pet", "controls"],
+  "description": "Allow desktop windows to receive native settings and power events.",
+  "windows": ["pet", "controls", "original"],
   "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

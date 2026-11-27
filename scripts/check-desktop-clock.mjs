@@ -86,3 +86,69 @@ test('a settings redraw while suspended does not restart continuous rendering', 
   assert.equal(calls, 2);
   clock.dispose();
 });
+
+function setupSystemClock() {
+  const requests = [];
+  const clock = createDesktopClock({performance: {now: () => 100}}, (id, _, epoch) => {
+    requests.push({id, epoch});
+  });
+  return {clock, requests};
+}
+
+test('a discarded in-flight frame cannot stall the clock after system resume', () => {
+  const {clock, requests} = setupSystemClock();
+  let calls = 0;
+  const animate = () => { calls++; clock.request(animate); };
+  clock.request(animate);
+  const old = requests[0];
+  clock.setSystemSuspended(true, 1);
+  clock.tick(old.id, old.epoch);
+  assert.equal(calls, 0);
+  clock.setSystemSuspended(false, 2);
+  const current = requests[1];
+  assert.equal(current.epoch, 2);
+  clock.tick(current.id, 0);
+  assert.equal(calls, 0);
+  clock.tick(current.id, current.epoch);
+  assert.equal(calls, 1);
+  assert.equal(requests.length, 3);
+});
+
+test('system suspension blocks one-shot redraws while manual pause permits them', () => {
+  const {clock, requests} = setupSystemClock();
+  clock.setRunning(false);
+  clock.request(() => {});
+  clock.redraw();
+  assert.equal(requests.length, 1);
+  clock.setSystemSuspended(true, 1);
+  clock.redraw();
+  assert.equal(requests.length, 1);
+});
+
+test('resume replays one deferred redraw and keeps manual pause', () => {
+  const {clock, requests} = setupSystemClock();
+  let calls = 0;
+  const animate = () => { calls++; clock.request(animate); };
+  clock.setRunning(false);
+  clock.setSystemSuspended(true, 1);
+  clock.request(animate);
+  clock.redraw();
+  clock.redraw();
+  clock.setSystemSuspended(false, 2);
+  assert.equal(requests.length, 1);
+  clock.tick(requests[0].id, requests[0].epoch);
+  assert.equal(calls, 1);
+  assert.equal(requests.length, 1);
+});
+
+test('a newer awake snapshot supersedes its missing suspend event and ignores old epochs', () => {
+  const {clock, requests} = setupSystemClock();
+  clock.request(() => {});
+  clock.setSystemSuspended(false, 2);
+  assert.deepEqual(requests.map(request => request.epoch), [0, 2]);
+  clock.setSystemSuspended(true, 1);
+  clock.setSystemSuspended(false, 0);
+  clock.tick(requests[1].id, 2);
+  clock.request(() => {});
+  assert.deepEqual(requests.map(request => request.epoch), [0, 2, 2]);
+});

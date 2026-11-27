@@ -1,3 +1,4 @@
+import {subscribeSystemSuspend} from './desktop-suspend.js';
 import * as THREE from './assets/three.module.js';
 import {createOrganicAppearance} from './organic.js?v=19';
 import {MechanicalMotion} from './motion.js?v=17';
@@ -246,8 +247,13 @@ function renderInterpolated(alpha){
  for(const r of renderFeet)r.leg.foot.copy(r.current);
  body.updateMatrixWorld(true);
 }
+const tauri = window.self===window.top ? window.__TAURI__ : null;
+const suspendBridge = tauri?.core?.invoke && tauri?.event?.listen ? tauri : null;
+let rafId=null, systemSuspended=Boolean(suspendBridge);
 function animate(now){
- requestAnimationFrame(animate);
+ rafId=null;
+ if(systemSuspended)return;
+ scheduleFrame();
  const workStart=performance.now();
  const elapsed=clamp((now-last)/1000,0,.25);last=now;
  if(!state.paused){
@@ -266,7 +272,42 @@ function animate(now){
   renderedFrames=0;renderWork=0;fpsStart=now;
  }
 }
-requestAnimationFrame(animate);
+function scheduleFrame() {
+ if(!systemSuspended && rafId===null)rafId=requestAnimationFrame(animate);
+}
+
+if(suspendBridge){
+ let closed=false, dispose, receivedPower=false;
+ window.addEventListener('pagehide',()=>{
+  closed=true;
+  if(rafId!==null)cancelAnimationFrame(rafId);
+  dispose?.();
+ },{once:true});
+ subscribeSystemSuspend(suspendBridge,({suspended})=>{
+  if(closed)return;
+  receivedPower=true;
+  systemSuspended=suspended;
+  if(suspended){
+   if(rafId!==null)cancelAnimationFrame(rafId);
+   rafId=null;
+  }else{
+   last=performance.now();
+   scheduleFrame();
+  }
+ },unlisten=>{
+  if(closed)unlisten();
+  else dispose=unlisten;
+ }).catch(error=>{
+  console.warn('Could not read system suspend state:',error);
+  if(!closed&&!receivedPower){
+   systemSuspended=false;
+   last=performance.now();
+   scheduleFrame();
+  }
+ });
+}else{
+ scheduleFrame();
+}
 window.addEventListener('resize',()=>{
  width=innerWidth;height=innerHeight;camera.left=-width/2;camera.right=width/2;camera.top=height/2;camera.bottom=-height/2;camera.updateProjectionMatrix();renderer.setSize(width,height);
  const p=position.clone().project(camera);if(Math.abs(p.x)>.75||Math.abs(p.y)>.7){init();legs.forEach(l=>{l.initialized=false;l.stepping=false;});updateMotion(0);}

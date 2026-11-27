@@ -4,13 +4,11 @@ mod autostart;
 mod desktop;
 mod interaction;
 mod language;
+mod power;
 mod settings;
 
 use settings::{Command, Mode, Settings};
-use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Mutex, OnceLock,
-};
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -25,21 +23,88 @@ const DEFAULT_FRAME_INTERVAL_US: u64 = 16_667;
 const MIN_FRAME_INTERVAL_US: u64 = 16_667;
 const MAX_FRAME_INTERVAL_US: u64 = 100_000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrameRequest {
+    frame_id: u64,
+    epoch: u64,
+}
+
+struct FrameClockState {
+    requested: Option<FrameRequest>,
+    interval_us: u64,
+    power: power::PowerSnapshot,
+    stopping: bool,
+}
+
 struct FrameClock {
-    requested: AtomicU64,
-    interval_us: AtomicU64,
-    stopping: AtomicBool,
-    worker: OnceLock<std::thread::Thread>,
+    state: Mutex<FrameClockState>,
+    wake: Condvar,
 }
 
 impl Default for FrameClock {
     fn default() -> Self {
         Self {
-            requested: AtomicU64::new(0),
-            interval_us: AtomicU64::new(DEFAULT_FRAME_INTERVAL_US),
-            stopping: AtomicBool::new(false),
-            worker: OnceLock::new(),
+            state: Mutex::new(FrameClockState {
+                requested: None,
+                interval_us: DEFAULT_FRAME_INTERVAL_US,
+                power: power::PowerSnapshot::default(),
+                stopping: false,
+            }),
+            wake: Condvar::new(),
         }
+    }
+}
+
+impl FrameClock {
+    fn snapshot(&self) -> power::PowerSnapshot {
+        self.state.lock().unwrap().power
+    }
+
+    fn set_power(&self, power: power::PowerSnapshot) {
+        let mut state = self.state.lock().unwrap();
+        if power.epoch > state.power.epoch {
+            state.power = power;
+            state.requested = None;
+            self.wake.notify_all();
+        }
+    }
+
+    fn request(&self, request: FrameRequest, interval_us: u64) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if state.stopping || state.power.suspended || request.epoch != state.power.epoch {
+            return false;
+        }
+        state.requested = Some(request);
+        state.interval_us = interval_us;
+        self.wake.notify_one();
+        true
+    }
+
+    fn take_next(&self, deadline: Instant) -> Option<(FrameRequest, Duration)> {
+        let mut state = self.state.lock().unwrap();
+        loop {
+            if state.stopping {
+                return None;
+            }
+            if state.power.suspended || state.requested.is_none() {
+                state = self.wake.wait(state).unwrap();
+                continue;
+            }
+            let delay = deadline.saturating_duration_since(Instant::now());
+            if delay.is_zero() {
+                let request = state.requested.take().unwrap();
+                return Some((request, Duration::from_micros(state.interval_us)));
+            }
+            state = self.wake.wait_timeout(state, delay).unwrap().0;
+        }
+    }
+
+    fn stop(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.stopping = true;
+        state.requested = None;
+        self.wake.notify_all();
     }
 }
 
@@ -154,51 +219,62 @@ fn authorize_pet(window: &WebviewWindow) -> DesktopResult<()> {
 }
 
 #[tauri::command]
+fn get_system_suspend_state(
+    window: WebviewWindow,
+    app: tauri::AppHandle,
+) -> DesktopResult<power::PowerSnapshot> {
+    match window.label() {
+        "pet" | "controls" | "original" => Ok(app.state::<FrameClock>().snapshot()),
+        _ => Err("This window cannot query system suspend state".into()),
+    }
+}
+
+#[tauri::command]
 fn request_animation_frame(
     window: WebviewWindow,
     app: tauri::AppHandle,
     frame_id: u64,
     interval_ms: Option<f64>,
-) -> DesktopResult<()> {
+    epoch: Option<u64>,
+) -> DesktopResult<bool> {
     authorize_pet(&window)?;
-    let clock = app.state::<FrameClock>();
-    clock
-        .interval_us
-        .store(clamp_frame_interval_us(interval_ms), Ordering::Relaxed);
-    clock.requested.store(frame_id, Ordering::Relaxed);
-    if let Some(worker) = clock.worker.get() {
-        worker.unpark();
-    }
-    Ok(())
+    Ok(app.state::<FrameClock>().request(
+        FrameRequest {
+            frame_id,
+            epoch: epoch.unwrap_or_default(),
+        },
+        clamp_frame_interval_us(interval_ms),
+    ))
 }
 
 fn start_frame_clock(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         let clock = app.state::<FrameClock>();
-        let _ = clock.worker.set(std::thread::current());
         let mut next = Instant::now();
-        loop {
-            while clock.requested.load(Ordering::Relaxed) == 0
-                && !clock.stopping.load(Ordering::Relaxed)
-            {
-                std::thread::park();
-            }
-            if clock.stopping.load(Ordering::Relaxed) {
-                break;
-            }
-            std::thread::sleep(next.saturating_duration_since(Instant::now()));
-            let interval = Duration::from_micros(clock.interval_us.load(Ordering::Relaxed));
+        while let Some((request, interval)) = clock.take_next(next) {
             next = Instant::now() + interval;
-            let frame_id = clock.requested.swap(0, Ordering::Relaxed);
-            if frame_id != 0 {
-                // Requests are coalesced. A slow render cannot build an event backlog.
-                if let Err(error) = app.emit_to("pet", "desktop-frame", frame_id) {
-                    eprintln!("Desktop animation clock failed: {error}");
-                    break;
-                }
+            if request.epoch != clock.snapshot().epoch {
+                continue;
+            }
+            // The WebView also checks the epoch because delivery can cross a power edge.
+            if let Err(error) = app.emit_to("pet", "desktop-frame", request) {
+                eprintln!("Desktop animation clock failed: {error}");
+                break;
             }
         }
     });
+}
+
+fn update_system_power(app: &tauri::AppHandle, snapshot: power::PowerSnapshot) {
+    app.state::<FrameClock>().set_power(snapshot);
+    interaction::set_system_suspended(snapshot.suspended, snapshot.epoch);
+    for window in ["pet", "original"] {
+        if app.get_webview_window(window).is_some() {
+            if let Err(error) = app.emit_to(window, "system-suspend", snapshot) {
+                eprintln!("Could not publish system power state to {window}: {error}");
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -597,6 +673,58 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod frame_clock_tests {
+    use super::*;
+    use std::sync::{mpsc, Arc};
+
+    fn power(suspended: bool, epoch: u64) -> power::PowerSnapshot {
+        power::PowerSnapshot { suspended, epoch }
+    }
+
+    fn frame(frame_id: u64, epoch: u64) -> FrameRequest {
+        FrameRequest { frame_id, epoch }
+    }
+
+    #[test]
+    fn frame_clock_suspend_clears_request_and_rejects_work() {
+        let clock = FrameClock::default();
+        assert!(clock.request(frame(1, 0), DEFAULT_FRAME_INTERVAL_US));
+        clock.set_power(power(true, 1));
+        assert!(clock.state.lock().unwrap().requested.is_none());
+        assert!(!clock.request(frame(2, 1), DEFAULT_FRAME_INTERVAL_US));
+    }
+
+    #[test]
+    fn frame_clock_resume_accepts_only_current_epoch() {
+        let clock = FrameClock::default();
+        clock.set_power(power(true, 1));
+        clock.set_power(power(false, 2));
+        clock.set_power(power(true, 1));
+        assert!(!clock.request(frame(1, 0), DEFAULT_FRAME_INTERVAL_US));
+        assert!(clock.request(frame(2, 2), DEFAULT_FRAME_INTERVAL_US));
+        assert_eq!(clock.take_next(Instant::now()).unwrap().0, frame(2, 2));
+    }
+
+    #[test]
+    fn frame_clock_sleep_is_interruptible_when_stopping_during_suspend() {
+        let clock = Arc::new(FrameClock::default());
+        assert!(clock.request(frame(1, 0), DEFAULT_FRAME_INTERVAL_US));
+        let worker = Arc::clone(&clock);
+        let (tx, rx) = mpsc::channel();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let thread = std::thread::spawn(move || {
+            tx.send(worker.take_next(deadline)).unwrap();
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+        clock.set_power(power(true, 1));
+        assert!(clock.state.lock().unwrap().requested.is_none());
+        clock.stop();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), None);
+        thread.join().unwrap();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(DesktopState::default())
@@ -610,6 +738,7 @@ fn main() {
             desktop_layout,
             place_viewport,
             request_animation_frame,
+            get_system_suspend_state,
             open_original,
             move_to_cursor_screen,
         ])
@@ -638,6 +767,12 @@ fn main() {
                 .layout = Some(layout);
             build_tray(app.handle())?;
             interaction::start(app.handle())?;
+            let power_app = app.handle().clone();
+            if let Err(error) =
+                power::start(move |snapshot| update_system_power(&power_app, snapshot))
+            {
+                eprintln!("Could not start Windows power monitoring: {error}");
+            }
             start_frame_clock(app.handle().clone());
             Ok(())
         })
@@ -655,14 +790,13 @@ fn main() {
         .expect("Failed to initialize Araneae desktop")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                if let Err(error) = power::stop() {
+                    eprintln!("Could not stop Windows power monitoring: {error}");
+                }
                 if let Err(error) = interaction::stop() {
                     eprintln!("Could not remove desktop click monitor: {error}");
                 }
-                let clock = app.state::<FrameClock>();
-                clock.stopping.store(true, Ordering::Relaxed);
-                if let Some(worker) = clock.worker.get() {
-                    worker.unpark();
-                }
+                app.state::<FrameClock>().stop();
             }
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..

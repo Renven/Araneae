@@ -1,6 +1,7 @@
 import * as THREE from './assets/three.module.js';
 import {applySettings} from './desktop-adapter.js';
 import {createDesktopClock} from './desktop-clock.js';
+import {createEpochRequest, subscribeSystemSuspend} from './desktop-suspend.js';
 import {createContentBounds, chooseViewport, computeViewportPlacement} from './desktop-viewport.js';
 import {DesktopBehavior} from './desktop-behavior.js';
 import {desktopStrings, localizeDesktop} from './desktop-i18n.js';
@@ -13,7 +14,11 @@ const {listen} = window.__TAURI__.event;
 let settings, page, spider, screens, bounds, behavior, viewport, clock, measureContent;
 let shadowLight = null, shadowHalf = 0;
 let baseScale = 1;
-let stopped = false, placing = false, readingCursor = false, readingLayout = false;
+let stopped = false, desktopReady = false, systemSuspended = true;
+let suspendEpoch = -1, runtimeEpoch = -1, releaseActivation, cancelRetry;
+let cursorTimer = null, geometryTimer = null;
+const cursorRequests = createEpochRequest(), layoutRequests = createEpochRequest();
+const placementRequests = createEpochRequest();
 let resetCrop = true, styledViewport = null, boundsFrame = 0;
 let lastPlaced = null, topology = '';
 let cursorFailures = 0, cursorErrorShown = false, activeErrorSource = null;
@@ -94,11 +99,13 @@ function apply(next) {
   }
 }
 
-async function readLayout() {
-  if (readingLayout || stopped) return;
-  readingLayout = true;
+async function readLayout(epoch = suspendEpoch) {
+  if (!isActiveEpoch(epoch)) return false;
+  const request = layoutRequests.begin(epoch);
+  if (!request) return false;
   try {
     const snapshot = await invoke('desktop_layout');
+    if (!isActiveEpoch(epoch) || !layoutRequests.isCurrent(request)) return false;
     baseScale = Number.isFinite(snapshot.baseScale) && snapshot.baseScale > 0 ? snapshot.baseScale : 1;
     const dpr = frame.contentWindow?.devicePixelRatio || 1;
     const key = JSON.stringify({screens: snapshot.screens, baseScale});
@@ -106,7 +113,7 @@ async function readLayout() {
       if (spider && settings?.visible && styledViewport && styledViewport.dpr !== dpr && clock) {
         clock.redraw();
       }
-      return;
+      return true;
     }
     const previousPoint = spider ? globalPoint() : null;
     topology = key;
@@ -132,20 +139,28 @@ async function readLayout() {
     }
     if (spider) installBehavior();
     if (spider && settings.visible) clock.redraw();
+    return true;
+  } catch (error) {
+    if (isActiveEpoch(epoch) && layoutRequests.isCurrent(request)) throw error;
+    return false;
   } finally {
-    readingLayout = false;
+    layoutRequests.finish(request);
   }
 }
 
 async function readCursor() {
-  if (readingCursor || stopped || !settings?.visible || settings.paused || settings.mode !== 'follow') return;
-  readingCursor = true;
+  const epoch = suspendEpoch;
+  if (!isActiveEpoch(epoch) || !settings?.visible || settings.paused || settings.mode !== 'follow') return;
+  const request = cursorRequests.begin(epoch);
+  if (!request) return;
   try {
     const point = await invoke('cursor_position');
+    if (!isActiveEpoch(epoch) || !cursorRequests.isCurrent(request)) return;
     if (behavior) behavior.pointer = point;
     cursorFailures = 0;
     clearCursorError();
   } catch (error) {
+    if (!isActiveEpoch(epoch) || !cursorRequests.isCurrent(request)) return;
     // Transient Windows failures (e.g. UAC / lock screen / monitor hot-plug)
     // must not permanently stop pointer polling.
     cursorFailures++;
@@ -155,7 +170,7 @@ async function readCursor() {
       cursorErrorShown = true;
     }
   } finally {
-    readingCursor = false;
+    cursorRequests.finish(request);
   }
 }
 
@@ -217,11 +232,14 @@ function syncViewportDomAndNative(point) {
   } else if (styledViewport.dpr !== dpr) {
     styledViewport.dpr = dpr;
   }
-  if (placing || (lastPlaced && distance(viewport, lastPlaced) < 1
+  const epoch = suspendEpoch;
+  if (!isActiveEpoch(epoch) || (lastPlaced && distance(viewport, lastPlaced) < 1
     && viewport.width === lastPlaced.width && viewport.height === lastPlaced.height)) return;
-  placing = true;
+  const request = placementRequests.begin(epoch);
+  if (!request) return;
   const requested = {...viewport};
   invoke('place_viewport', {bounds: requested, center: point}).then(actual => {
+    if (!isActiveEpoch(epoch) || !placementRequests.isCurrent(request)) return;
     const tolerance = settings?.platform === 'windows' ? 2 : 1;
     const constrained = Math.abs(actual.x - requested.x) > tolerance
       || Math.abs(actual.y - requested.y) > tolerance
@@ -237,7 +255,9 @@ function syncViewportDomAndNative(point) {
     } else {
       lastPlaced = requested;
     }
-  }).catch(report).finally(() => { placing = false; });
+  }).catch(error => {
+    if (isActiveEpoch(epoch)) report(error);
+  }).finally(() => placementRequests.finish(request));
 }
 
 function updateAdaptivePacing() {
@@ -335,20 +355,32 @@ async function waitForOriginal() {
   const child = frame.contentWindow;
   const document = child.document;
   document.open();
-  clock = createDesktopClock(child, (frameId, intervalMs) =>
-    invoke('request_animation_frame', intervalMs != null ? {frameId, intervalMs} : {frameId}).catch(report));
+  clock = createDesktopClock(child, (frameId, intervalMs, epoch) =>
+    invoke('request_animation_frame', {frameId, intervalMs, epoch}).catch(error => {
+      if (isActiveEpoch(epoch)) report(error);
+      return false;
+    }));
+  clock.setSystemSuspended(true, suspendEpoch);
   // Install the crop before the original's first display frame can allocate a
   // full virtual-desktop drawing surface.
   clock.setRunning(false);
-  cleanup.push(await listen('desktop-frame', event => clock.tick(event.payload)));
+  registerCleanup(await listen('desktop-frame', ({payload}) => {
+    if (typeof payload === 'number') clock.tick(payload);
+    else clock.tick(payload.frameId, payload.epoch);
+  }));
   child.requestAnimationFrame = clock.request;
   child.cancelAnimationFrame = clock.cancel;
   cleanup.push(clock.dispose);
   document.write(html);
   document.close();
-  const deadline = performance.now() + 30000;
+  let deadline = performance.now() + 30000;
   while (!frame.contentWindow?.__spider) {
     if (stopped) throw new Error('Desktop pet was closed during initialization');
+    if (systemSuspended) {
+      await waitForActivation();
+      deadline = performance.now() + 30000;
+      continue;
+    }
     if (performance.now() > deadline) throw new Error('Original spider did not initialize within 30 seconds');
     await new Promise(resolve => setTimeout(resolve, 50));
   }
@@ -396,12 +428,104 @@ function keydown(event) {
   }
 }
 
-const cursorTimer = setInterval(() => readCursor(), 1000 / 30);
-const geometryTimer = setInterval(() => readLayout().catch(report), 2500);
-window.addEventListener('pagehide', () => {
-  stopped = true;
+function registerCleanup(dispose) {
+  if (stopped) dispose();
+  else cleanup.push(dispose);
+}
+
+function isActiveEpoch(epoch) {
+  return !stopped && !systemSuspended && epoch === suspendEpoch;
+}
+
+function waitForActivation() {
+  return new Promise(resolve => { releaseActivation = resolve; });
+}
+
+async function initializeLayout() {
+  while (!stopped) {
+    if (systemSuspended) {
+      await waitForActivation();
+      continue;
+    }
+    const epoch = suspendEpoch;
+    try {
+      if (await readLayout(epoch) && isActiveEpoch(epoch)) return epoch;
+    } catch (error) {
+      if (isActiveEpoch(epoch)) throw error;
+    }
+  }
+  return null;
+}
+
+function stopPolling() {
   clearInterval(cursorTimer);
   clearInterval(geometryTimer);
+  cursorTimer = geometryTimer = null;
+  cancelRetry?.();
+}
+
+function finishResume(epoch) {
+  if (!isActiveEpoch(epoch)) return;
+  runtimeEpoch = epoch;
+  page.dispatchEvent(new page.defaultView.Event('visibilitychange'));
+  clock.setRunning(Boolean(settings?.visible && !settings.paused));
+  clock.setSystemSuspended(false, epoch, Boolean(settings?.visible));
+  cursorTimer = setInterval(readCursor, 1000 / 30);
+  geometryTimer = setInterval(() => readLayout().catch(report), 2500);
+}
+
+async function resumeFromSystemSuspend(epoch) {
+  let error;
+  for (const delay of [0, 200, 400, 800]) {
+    if (delay) {
+      await new Promise(resolve => {
+        const done = () => {
+          clearTimeout(timer);
+          cancelRetry = null;
+          resolve();
+        };
+        const timer = setTimeout(done, delay);
+        cancelRetry = done;
+      });
+    }
+    if (!isActiveEpoch(epoch)) return;
+    try {
+      if (await readLayout(epoch)) {
+        finishResume(epoch);
+        return;
+      }
+    } catch (failure) {
+      error = failure;
+    }
+    if (!isActiveEpoch(epoch)) return;
+  }
+  console.warn('Desktop layout refresh failed after system resume:', error);
+  finishResume(epoch);
+}
+
+function applySystemSuspend({suspended, epoch}) {
+  if (stopped || epoch <= suspendEpoch) return;
+  suspendEpoch = epoch;
+  systemSuspended = suspended;
+  stopPolling();
+  // Keep both continuous frames and redraws gated until the new layout is ready.
+  clock?.setSystemSuspended(true, epoch);
+  if (!suspended) {
+    releaseActivation?.();
+    releaseActivation = null;
+    if (desktopReady) void resumeFromSystemSuspend(epoch);
+  }
+}
+
+function acceptInput(payload) {
+  return isActiveEpoch(runtimeEpoch) && (payload.epoch === undefined || payload.epoch === runtimeEpoch);
+}
+
+window.addEventListener('pagehide', () => {
+  stopped = true;
+  stopPolling();
+  releaseActivation?.();
+  releaseActivation = null;
   cleanup.forEach(dispose => dispose());
 }, {once: true});
 window.addEventListener('keydown', event => {
@@ -414,23 +538,25 @@ window.addEventListener('keydown', event => {
 });
 
 try {
+  await subscribeSystemSuspend(window.__TAURI__, applySystemSuspend, registerCleanup);
   cleanup.push(await listen('pet-settings', event => apply(event.payload)));
   cleanup.push(await listen('pet-relocate', event => {
-    behavior?.relocate(event.payload);
+    if (acceptInput(event.payload)) behavior?.relocate(event.payload);
   }));
   cleanup.push(await listen('pet-avoid', event => {
-    if (!settings?.visible || settings.paused || !settings.avoidPointer || settings.mode === 'follow' || !spider || !behavior) return;
+    if (!acceptInput(event.payload) || !settings?.visible || settings.paused || !settings.avoidPointer || settings.mode === 'follow' || !spider || !behavior) return;
     if (behavior.avoid(event.payload) && settings.visible) clock.redraw();
   }));
   cleanup.push(await listen('pet-destination', event => {
-    if (!settings?.visible || settings.paused || !spider || !behavior) return;
+    if (!acceptInput(event.payload) || !settings?.visible || settings.paused || !spider || !behavior) return;
     const {point, fast} = event.payload;
     if (!behavior.allowsPoint(point)) return;
     spider.commandMove({clientX: point.x - bounds.x, clientY: point.y - bounds.y, button: 0}, fast);
     if (settings.visible) clock.redraw();
   }));
   apply(await invoke('get_settings'));
-  await readLayout();
+  const initialLayoutEpoch = await initializeLayout();
+  if (stopped) throw new Error('Desktop pet was closed during initialization');
   await waitForOriginal();
   installBehavior();
   apply(settings);
@@ -442,8 +568,13 @@ try {
   watchDevicePixelRatio();
   frame.contentWindow.addEventListener('keydown', keydown);
   frame.classList.add('ready');
+  desktopReady = true;
+  if (!systemSuspended) {
+    if (initialLayoutEpoch === suspendEpoch) finishResume(suspendEpoch);
+    else void resumeFromSystemSuspend(suspendEpoch);
+  }
   await invoke('pet_ready', {renderer: spider.renderer.isWebGLRenderer ? 'WebGL' : 'Canvas fallback'});
 } catch (error) {
-  report(error);
-  await invoke('pet_ready', {renderer: 'initialization failed'}).catch(console.error);
+  if (!stopped) report(error);
+  if (!stopped) await invoke('pet_ready', {renderer: 'initialization failed'}).catch(console.error);
 }
