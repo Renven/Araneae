@@ -1,11 +1,6 @@
 name: Deploy static content to Pages
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    paths:
-      - '.github/workflows/static.yml'
   workflow_dispatch:
 
 permissions:
