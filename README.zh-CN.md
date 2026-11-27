@@ -2,181 +2,162 @@
 
 [English](README.md) | 简体中文
 
-**[在线体验网页版](https://jaaasonho.github.io/Araneae/)** — 无需安装。演示在浏览器标签页内运行；桌面悬浮和跨屏移动需要 macOS App。
+> **上游来源**：本项目 Fork 自 [jaaasonho/Araneae](https://github.com/jaaasonho/Araneae)（MIT 许可证）。
+> 本仓库（[Renven/Araneae](https://github.com/Renven/Araneae)）在上游源码基础上重点完善了 **Windows 10/11 桌面端支持**、**息屏 / 锁屏 / 休眠自动零功耗挂起**、**零轮询鼠标避让**、**Windows 开机自启动**、**自定义配色与 10 款蜘蛛预设** 以及 **Windows 渲染性能优化**。
+
+一个在屏幕上散步、观察、躲避和冲刺的程序化 3D 蜘蛛桌宠。基于 **Tauri 2 + Three.js** 构建，身体、八条腿、眼睛和细毛全部由代码实时生成，无需外部 3D 模型，运行全程无需联网。
+
+**[在线体验上游网页版演示](https://jaaasonho.github.io/Araneae/)** — 无需安装，直接在浏览器标签页体验。
 
 ![Araneae 网页版演示：浅色背景上的蜘蛛与行为控制面板](docs/images/browser-demo.jpg)
 
-macOS 桌宠可以悬浮在其他应用上方，下面是它在 Google 翻译页面上的效果：
+![Araneae 桌宠悬浮在其他应用上方](docs/images/desktop-demo.jpg)
 
-![Araneae macOS 桌宠悬浮在 Google 翻译页面上方](docs/images/desktop-demo.jpg)
+---
 
-一个在屏幕上散步、观察和冲刺的蜘蛛桌宠。使用 **Tauri 2 + Three.js**，身体、八条腿、眼睛和细毛由代码生成，无需外部模型。
+## 上游来源与本仓库增强
 
-桌宠目前支持 **macOS 12 及以上版本**与 **Windows 10（22H2+）/ Windows 11（x64）**；macOS 当前构建在 Apple Silicon Mac 上验证过，Windows 已验证双屏与透明悬浮，Intel Mac、Windows ARM64 和 Linux 桌宠尚未验证。项目同时保留可在浏览器中独立运行的网页版。
+在完整保留上游 macOS 桌宠与独立网页版能力的前提下，本仓库 `main` 分支新增了以下改进：
 
-## 特点
+- **完整的 Windows 桌面端支持（x64）**：已在 Windows 10（22H2+）与 Windows 11 双屏环境下实机验证，支持透明鼠标穿透悬浮（`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`）、多屏跨屏路由、混合 DPI 接缝对齐、Windows 系统托盘图标与多尺寸 `icon.ico`。
+- **Windows 息屏 / 锁屏 / Modern Standby 自动挂起（零功耗优化）**：
+  - 通过独立的隐藏顶层 Win32 消息窗口，同时监听显示器开关（`GUID_SESSION_DISPLAY_STATUS`）、会话锁屏/解锁（`WTSRegisterSessionNotification` + 启动期 `WTSSessionInfoEx` 锁屏初值探测）与睡眠/新型待机（`RegisterSuspendResumeNotification`）。
+  - 同时挂起**桌宠窗口（`pet`）**与从控制面板打开的**完整原版窗口（`original`）**：真机实测挂起期间整个进程组（主进程 + 全部 WebView2 子进程）CPU 消耗降幅 **>99%**、GPU 利用率峰值 **`0%`**，且绝不篡改用户手动设置的「暂停 / 隐藏」状态。
+  - 前后端统一采用单调递增的电源代次（`epoch`），严格过滤跨挂起迟到帧、过时布局/光标异步结果以及锁屏前残留的鼠标输入，亮屏解锁后平滑无缝续跑。
+- **零轮询鼠标避让（Windows）**：在非「跟随鼠标」模式下可开启「躲避鼠标」，由低级鼠标钩子在本地比对光标与蜘蛛距离触发避让，无额外轮询开销。
+- **Windows 开机自启动开关**：在控制面板一键开关，读写当前用户注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`。
+- **自定义配色与 10 款著名蜘蛛预设**：支持任意 `#RRGGBB` 自定义取色，内置 10 种蜘蛛预设（黑寡妇、红膝、孔雀跳蛛、游走蛛、漏斗网蛛、狼蛛、黄金圆蛛、歌利亚捕鸟蛛、巨蟹蛛、蟹蛛），支持中英文界面跟随系统语言。
+- **Windows 渲染优化与功耗采样工具**：支持自适应帧率调节（24–60 FPS）、512×512 紧凑跟踪阴影贴图，并提供进程组 CPU/GPU 采样脚本 `scripts/measure-windows-power.ps1`。
 
-- 程序化外形、八足抓地步态、头身观望、惯性刹车、滑痕与浮尘。
-- 自主巡逻、跟随鼠标、原地观察三种模式。
-- 透明悬浮，默认鼠标穿透；支持普通桌面和全屏应用空间。
-- 按显示器排列规划跨屏路线，支持左右、上下及错位相接的屏幕。
-- 可关闭跨屏，将巡逻、跟随及手动指令限定在当前屏幕。
-- 可调整速度、体型，支持暂停和隐藏；暂停或隐藏后停止持续绘制。
-- 应用运行无需联网，Three.js 随源码附带。
+---
 
-## 应用体积与资源占用
+## 核心特性
 
-本地 **macOS arm64 App 约 8.9 MiB**（9,327,831 字节，测量于 2026 年 11 月 24 日）。该数值为 `Araneae.app` 内文件大小之和，不是运行内存，也不是已发布 ZIP/DMG 的下载体积。构建选项、架构及后续改动可能影响体积。
+- **程序化外形与步态**：八足抓地步态、头身观望姿态、惯性刹车、滑痕与浮尘效果。
+- **三种行为模式**：自主巡逻、跟随鼠标、原地观察。
+- **多屏透明悬浮**：默认鼠标穿透，支持左右、上下及错位相接的多显示器排列，也可关闭跨屏将其限定在当前屏幕。
+- **外观与控制**：可调速度（`0.35×–3.00×`，默认 `1.25×`）、体型（`0.35×–2.10×`，默认 `0.50×`）、配色与预设、暂停/隐藏；界面语言自动跟随系统（简体中文 / 英文）。
+- **纯本地离线运行**：Three.js r170 随源码附带，无遥测、无账号登录、无数据上传。
 
-三维桌宠在活动时会持续使用 CPU、GPU 和内存，安装包小并不意味着运行开销可以忽略：
+---
 
-- 查看资源占用时，需要包含主进程及关联的 WebKit 网页内容、图形/媒体和网络进程。
-- 占用会随行为模式、显示器配置、缩放及硬件变化。此前的短时测量不能作为当前版本的性能基准，项目暂不承诺固定的 CPU 或内存指标。
-- 暂停或隐藏可停止持续绘制、减少渲染工作，但不会退出应用或释放全部内存。
+## 使用指南
 
-## 使用桌宠
-
-从源码构建后，将 `Araneae.app` 拖入「应用程序」并打开。若另行下载了预编译 App，需确认其处理器架构与自己的 Mac 相符。仓库源码不包含编译后的 App。
-
-应用启动后只显示蜘蛛和菜单栏的小眼睛图标，不自动打开控制面板，也不占用 Dock。从菜单栏打开「控制面板」即可调整设置。桌宠界面在启动时跟随系统首选语言：中文使用简体中文，其他语言使用英文，覆盖菜单栏、控制面板、窗口标题和提示消息。修改系统语言后需重启应用。
+启动后桌宠直接显示在屏幕上，同时在 **Windows 系统托盘** / **macOS 菜单栏**出现小眼睛图标，点击即可切换模式或打开「控制面板」。
 
 | 操作 | 效果 |
 | --- | --- |
-| 菜单栏 / 系统托盘或面板选择行为模式 | 自主巡逻、跟随鼠标或原地观察 |
-| macOS `⌘ Command + 单击` / Windows `Ctrl + 单击` | 临时以最高 3× 速度冲刺前往；再次点击可改换目的地 |
-| 关闭「允许跨屏」 | 留在蜘蛛当前所在屏幕，忽略其他屏幕的冲刺点击 |
-| 暂停 / 隐藏 | 停止持续绘制，并忽略移动指令 |
-| 在控制面板内按空格 | 暂停 / 继续 |
+| 托盘 / 菜单栏或控制面板选择模式 | 切换「自主巡逻」「跟随鼠标」「原地观察」 |
+| Windows `Ctrl + 单击` / macOS `⌘ Command + 单击` | 以最高 `3×` 速度冲刺前往目标点；再次点击可改换目的地 |
+| 开关「躲避鼠标」*（Windows）* | 非跟随模式下，光标靠近蜘蛛时自动避让 |
+| 开关「允许跨屏」 | 开启或禁止跨显示器巡逻、跟随与冲刺 |
+| 颜色选择 / 预设 | 应用自定义十六进制配色或 10 款蜘蛛预设（支持一键重置） |
+| **暂停** / **隐藏**（或在控制面板按空格） | 停止持续渲染并忽略移动指令 |
+| 开关「开机启动」*（Windows）* | 写入或移除当前用户 `HKCU\...\Run` 自启动项 |
 
-手动冲刺不改变已选模式：原地观察时，冲刺到达后会继续在新位置观察。途中切换模式则取消手动路线。普通单击、双击不指挥桌宠，鼠标事件仍传递给原应用；控制面板和菜单内的点击不指挥桌宠。
+- 普通单击、双击会直接穿透给下层应用，不会干扰日常操作。
+- 手动冲刺不会改变当前所选模式；途中切换模式则会取消冲刺路线。
+- 除 Windows「开机启动」写入当前用户注册表外，其余运行参数仅保存在内存中，退出后不持久化。
 
-速度范围为 **0.35×–3.00×**，默认 **1.25×**；体型范围为 **0.35×–2.10×**，默认 **0.50×**。「允许跨屏」默认开启。其余运行设置仅保存在内存中、退出后不保存；Windows 下的「开机启动」开关会向当前用户注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 写入或移除登录项，并在下次启动时读取状态。
+### 多屏、电源行为与已知限制
 
-### 多屏与已知限制
-
-- 显示器位置遵循 macOS「系统设置 → 显示器 → 排列」。跨屏需要屏幕边缘相接；镜像屏幕视为同一个区域。
-- 使用 macOS 逻辑点统一坐标。显示器拔插或排列变化后自动更新；当前屏幕被移除时，蜘蛛会恢复到可见屏幕上。
-- 关闭跨屏时会取消原路线，并限定在当前屏幕；重新开启后恢复跨屏能力。
-- 目的地避开菜单栏、Dock 或 Windows 任务栏，并在屏幕边缘保留身体空间；跨屏过渡段允许短暂穿过接缝处的任务栏/菜单栏；边缘点击不保证身体中心精确落在指针位置。
-- 锁屏、UAC 提权界面和系统保护界面不保证覆盖；Windows 独占全屏游戏（Exclusive Fullscreen）或其他后置顶的 `Topmost` 窗口可能覆盖桌宠；受 Windows UIPI 限制，普通权限下不接收管理员权限前台窗口上的 `Ctrl + 单击`。
-- 当前构建使用本地临时签名，未进行 Apple 公证或 Windows 代码签名，其他设备可能遇到系统安全提示。
+- **多屏显示**：跨屏要求显示器边缘相接，镜像屏幕视作同一区域；显示器热插拔或排列调整后会自动更新坐标，当前屏幕移除时自动把蜘蛛恢复到可见屏幕。
+- **息屏 / 锁屏 / 待机（Windows）**：显示器关闭（`Off`）、锁屏或进入睡眠 / Modern Standby 时自动挂起渲染（屏幕变暗 `Dimmed` 仍继续运行）；恢复亮屏且解锁后自动续跑，并完整保留用户的手动暂停与隐藏状态。
+- **覆盖与权限限制**：锁屏、UAC 提权界面、独占全屏游戏或后置顶的 `Topmost` 窗口可能覆盖桌宠；受 Windows UIPI 限制，普通权限运行无法接收管理员权限窗口上的 `Ctrl + 单击`。
+- **代码签名**：本地构建默认无 Windows Authenticode 签名与 Apple 公证，也无自动更新器。
 
 ### 鼠标事件与隐私
 
-桌宠通过全局被动鼠标监听识别其他应用中的冲刺点击（macOS 为 `Command + 单击`，Windows 为低级鼠标钩子识别 `Ctrl + 单击`），处理左键按下、抬起、拖拽越界判断以及对应修饰键状态；在 Windows 下开启「躲避鼠标」（非跟随模式）时，钩子也会在本地比对 `WM_MOUSEMOVE` 光标与蜘蛛的距离以触发避让。应用不记录其他应用的键盘输入或鼠标轨迹，也不吞掉鼠标事件；当前代码没有遥测、账号登录或数据上传功能。
+桌宠仅通过系统被动全局鼠标监听（Windows `WH_MOUSE_LL` / macOS `NSEvent`）识别 `Ctrl + 单击` / `Command + 单击` 冲刺，以及在 Windows 开启「躲避鼠标」时于本地比对光标与蜘蛛距离。应用不吞掉鼠标事件，不记录键盘输入或鼠标轨迹，不包含任何遥测或网络上传代码。
 
-## 从源码运行
+---
 
-### 网页版
+## 从源码运行与构建
 
-需要 Node.js 18 或以上版本。不需要 `npm install` 或前端构建：
+### Windows 桌宠（x64）
 
-```bash
-npm run dev
+环境要求：**Node.js 18+**、**Visual Studio C++ Build Tools**（MSVC + Windows 10/11 SDK）、**Rust 1.88+**（`x86_64-pc-windows-msvc`）、**WebView2 Runtime**（Windows 11 默认自带）与 **Tauri CLI 2**：
+
+```powershell
+cargo install tauri-cli --version '^2' --locked
+npm run desktop:dev
 ```
 
-打开 **http://127.0.0.1:4173/**。不要直接双击 `dist/index.html`，ES Module 需要通过 HTTP 服务加载。也可以将 `dist/` 部署为静态站点。
+构建 Release 可执行文件或 NSIS 安装包：
 
-端口冲突时，macOS / Linux 可运行 `PORT=4174 npm run dev`；PowerShell 可运行 `$env:PORT=4174; npm run dev`。
+```powershell
+# 独立 Release 可执行文件 -> src-tauri/target/release/shadow-spider-desktop.exe
+cargo build --release --manifest-path src-tauri/Cargo.toml --locked
 
-网页版的操作与桌宠不同：**单击前往、双击冲刺、空格暂停**，并保留深浅背景和全屏控件，界面仍为简体中文。跨屏、Command + 单击及自动选择界面语言属于 macOS 桌宠功能。
+# NSIS 安装包 -> src-tauri/target/release/bundle/nsis/
+npm run desktop:build:win
+```
 
 ### macOS 桌宠
 
-需要 Node.js 18+、Rust、Xcode Command Line Tools 和 Tauri CLI 2。当前成功构建使用 Rust **1.91.1**，Rust 依赖版本由 `src-tauri/Cargo.lock` 固定。
+环境要求：**Node.js 18+**、**Rust**、**Xcode Command Line Tools** 与 **Tauri CLI 2**（Apple Silicon 已验证）：
 
 ```bash
 xcode-select --install
 cargo install tauri-cli --version '^2' --locked
 npm run desktop:dev
-```
-
-已安装 Xcode Command Line Tools 或 Tauri CLI 时，可跳过对应安装命令。首次构建需要联网下载依赖，缓存完整后可离线构建。
-
-生成当前 Mac 架构的 App：
-
-```bash
 npm run desktop:build
 ```
 
-产物位置：
+产物路径：`src-tauri/target/release/bundle/macos/Araneae.app`。
 
-```text
-src-tauri/target/release/bundle/macos/Araneae.app
+### 独立网页版
+
+仅需 **Node.js 18+**（无需 `npm install`）：
+
+```bash
+npm run dev
 ```
 
-缓存完整时可使用 `CARGO_NET_OFFLINE=true npm run desktop:build`。当前构建配置不执行 Apple 公证，也没有自动更新功能。
+浏览器打开 **http://127.0.0.1:4173/**（不要直接双击 `dist/index.html`，ES Module 需经 HTTP 服务加载）。网页版操作为：**单击前往、双击冲刺、空格暂停**。
 
-### Windows 桌宠（x64）
+---
 
-需要 Node.js 18+、Visual Studio C++ Build Tools（MSVC + Windows 10/11 SDK）、Rust 1.88+（`x86_64-pc-windows-msvc`，当前构建验证于 Rust 1.100.0）、WebView2 Runtime（Windows 11 默认自带）和 Tauri CLI 2：
-
-```powershell
-cargo install tauri-cli --version '^2' --locked
-npm run desktop:dev
-```
-
-生成 Windows NSIS 安装包：
-
-```powershell
-npm run desktop:build:win
-```
-
-产物位置：
-
-```text
-src-tauri/target/release/bundle/nsis/
-```
-
-默认安装包采用 Tauri `downloadBootstrapper` 模式：若目标机器缺少 WebView2 Runtime，首次安装时需要联网下载运行时。当前构建不包含代码签名与自动更新。
-
-## 开发与检查
+## 项目结构与验证
 
 | 路径 | 职责 |
 | --- | --- |
-| `dist/app.js` | 场景、交互和运动循环 |
-| `dist/organic.js` | 外形、材质、细毛和兼容绘制 |
-| `dist/motion.js` | 加减速、冲刺、刹车和身体姿态 |
-| `dist/gait.js`、`dist/leg-safety.js` | 八足步态、支撑约束和腿段避让 |
-| `dist/patrol.js`、`dist/skid-effects.js` | 巡逻、观望和刹车效果 |
-| `dist/desktop*.js` | 桌面坐标、导航、裁剪、时钟和设置适配 |
+| `dist/app.js` | 3D 场景、动画循环与顶层 Tauri 窗口挂起桥接 |
+| `dist/organic.js` | 程序化外观、配色/预设材质、细毛与 2D 兼容绘制 |
+| `dist/motion.js`、`dist/gait.js`、`dist/leg-safety.js` | 运动学、八足步态、支撑约束与腿段避让 |
+| `dist/patrol.js`、`dist/skid-effects.js` | 自主巡逻、观望动作与刹车滑痕/浮尘效果 |
+| `dist/desktop*.js` | 多屏坐标导航、视口裁剪、原生帧时钟与跨代挂起同步 |
 | `dist/controls.html`、`dist/controls.js` | 桌宠控制面板 |
-| `src-tauri/src/` | 原生窗口、菜单栏、鼠标监听和设置 |
-| `scripts/` | 运动、导航和时钟检查 |
-| `server.mjs` | 本地静态服务器 |
+| `src-tauri/src/main.rs` | Tauri 生命周期、`FrameClock`、系统托盘与 IPC 命令 |
+| `src-tauri/src/power.rs` | Windows 显示器 / 锁屏 / Modern Standby 监听与 `SuspendState` 状态机 |
+| `src-tauri/src/interaction.rs` | 全局被动鼠标钩子、冲刺手势、鼠标避让与代次过滤 |
+| `src-tauri/src/desktop.rs`、`autostart.rs`、`settings.rs`、`language.rs` | 原生多屏几何、Windows 自启动、设置校验与语言检测 |
+| `scripts/` | 运动模拟检查、桌面单元测试与 `measure-windows-power.ps1` |
 
-JavaScript 语法检查：
+### 常用检查命令
 
-```bash
+```powershell
+# JavaScript 语法检查
 npm run check
+
+# Rust 格式检查、编译检查与单元测试（29 项）
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo check --manifest-path src-tauri/Cargo.toml --locked
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+# 桌面端 Node 单元测试（32 项：导航、时钟、电源挂起、裁剪、多语言、配色预设）
+node --test scripts/check-desktop-routing.mjs scripts/check-desktop-clock.mjs scripts/check-desktop-suspend.mjs scripts/check-desktop-viewport.mjs scripts/check-desktop-i18n.mjs scripts/check-desktop-color.mjs
+
+# Windows 进程组 CPU 与 GPU 功耗采样（将 <PID> 替换为正在运行的 shadow-spider-desktop 进程 ID）
+powershell -ExecutionPolicy Bypass -File scripts/measure-windows-power.ps1 -ProcessId <PID> -Seconds 30
 ```
 
-按改动范围选择模拟检查：
+> **Windows CI 说明**：`.github/workflows/windows.yml` 在 `windows-latest` 上自动执行 JS 语法检查、`cargo fmt --check`、全部 6 个桌面 Node 专项测试以及 `cargo check` / `cargo test --locked`。完整桌面运动模拟 `scripts/check-desktop-motion.mjs` 仍保留在 `npm run desktop:test` 中，但上游基线存在既有的 `manual-horizontal-slow: patrol took over a manual destination` 失败，暂未纳入 CI 门禁。
 
-```bash
-npm run test:gait
-npm run test:burst
-npm run test:inertia
-npm run test:anchor
-npm run test:patrol
-npm run test:sprint
-```
-
-macOS 原生与桌面检查：
-
-```bash
-npm run desktop:check
-npm run desktop:test
-```
-
-模拟检查覆盖步态、惯性、锚定回正、巡逻、冲刺及桌面导航等规则，不能替代实际 Mac 上的视觉、全屏及多屏测试。
-
-**Windows CI** 工作流在 `windows-latest` 上执行 JavaScript 语法、Rust 格式、桌面专项测试（导航／时钟／电源挂起／裁剪／多语言／配色预设），以及原生编译检查和测试。附带的 `src-tauri/icons/icon.ico` 是 Tauri 在 Windows 编译资源所必需的图标。该工作流不构建安装包，也不发布 Release。完整桌面运动模拟暂未纳入：未修改的基线代码会在 `manual-horizontal-slow: patrol took over a manual destination` 处失败；`npm run desktop:test` 仍保留该检查。
-
-欢迎提交问题与改进。反馈请附 macOS 版本、Mac 芯片、显示器排列与缩放、行为模式及复现步骤；修改时尽量保持网页版与桌宠入口的行为边界，并避免无关重构。
+---
 
 ## 许可证与第三方代码
 
-项目采用 [MIT 许可证](LICENSE)，版权署名为 [jaaasonho](https://github.com/jaaasonho)。
-
-随源码附带的 Three.js r170 由 Three.js 作者持有版权，采用 MIT 许可，完整声明见 [THREE-LICENSE.txt](dist/assets/THREE-LICENSE.txt)。Rust 依赖保留各自的许可证，版本可在 `src-tauri/Cargo.lock` 中查询；项目的 MIT 许可不替代第三方许可。
+- **上游项目与许可证**：基于 MIT 许可证发布（见 [LICENSE](LICENSE)），原作者与版权署名为 [jaaasonho](https://github.com/jaaasonho)（上游仓库：[jaaasonho/Araneae](https://github.com/jaaasonho/Araneae)）。
+- **Three.js r170**：随源码附带于 `dist/assets/`，由 Three.js 作者持有版权并采用 MIT 许可，完整声明见 [THREE-LICENSE.txt](dist/assets/THREE-LICENSE.txt)。
+- **Rust 依赖**：版本固定于 `src-tauri/Cargo.lock`，各自保留其原许可证。
